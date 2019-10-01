@@ -16298,6 +16298,205 @@ cr.plugins_.Button = function(runtime)
 }());
 ;
 ;
+cr.plugins_.Function = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.Function.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var funcStack = [];
+	var funcStackPtr = -1;
+	var isInPreview = false;	// set in onCreate
+	function FuncStackEntry()
+	{
+		this.name = "";
+		this.retVal = 0;
+		this.params = [];
+	};
+	function pushFuncStack()
+	{
+		funcStackPtr++;
+		if (funcStackPtr === funcStack.length)
+			funcStack.push(new FuncStackEntry());
+		return funcStack[funcStackPtr];
+	};
+	function getCurrentFuncStack()
+	{
+		if (funcStackPtr < 0)
+			return null;
+		return funcStack[funcStackPtr];
+	};
+	function getOneAboveFuncStack()
+	{
+		if (!funcStack.length)
+			return null;
+		var i = funcStackPtr + 1;
+		if (i >= funcStack.length)
+			i = funcStack.length - 1;
+		return funcStack[i];
+	};
+	function popFuncStack()
+	{
+;
+		funcStackPtr--;
+	};
+	instanceProto.onCreate = function()
+	{
+		isInPreview = (typeof cr_is_preview !== "undefined");
+		var self = this;
+		window["c2_callFunction"] = function (name_, params_)
+		{
+			var i, len, v;
+			var fs = pushFuncStack();
+			fs.name = name_.toLowerCase();
+			fs.retVal = 0;
+			if (params_)
+			{
+				fs.params.length = params_.length;
+				for (i = 0, len = params_.length; i < len; ++i)
+				{
+					v = params_[i];
+					if (typeof v === "number" || typeof v === "string")
+						fs.params[i] = v;
+					else if (typeof v === "boolean")
+						fs.params[i] = (v ? 1 : 0);
+					else
+						fs.params[i] = 0;
+				}
+			}
+			else
+			{
+				cr.clearArray(fs.params);
+			}
+			self.runtime.trigger(cr.plugins_.Function.prototype.cnds.OnFunction, self, fs.name);
+			popFuncStack();
+			return fs.retVal;
+		};
+	};
+	function Cnds() {};
+	Cnds.prototype.OnFunction = function (name_)
+	{
+		var fs = getCurrentFuncStack();
+		if (!fs)
+			return false;
+		return cr.equals_nocase(name_, fs.name);
+	};
+	Cnds.prototype.CompareParam = function (index_, cmp_, value_)
+	{
+		var fs = getCurrentFuncStack();
+		if (!fs)
+			return false;
+		index_ = cr.floor(index_);
+		if (index_ < 0 || index_ >= fs.params.length)
+			return false;
+		return cr.do_cmp(fs.params[index_], cmp_, value_);
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.CallFunction = function (name_, params_)
+	{
+		var fs = pushFuncStack();
+		fs.name = name_.toLowerCase();
+		fs.retVal = 0;
+		cr.shallowAssignArray(fs.params, params_);
+		var ran = this.runtime.trigger(cr.plugins_.Function.prototype.cnds.OnFunction, this, fs.name);
+		if (isInPreview && !ran)
+		{
+;
+		}
+		popFuncStack();
+	};
+	Acts.prototype.SetReturnValue = function (value_)
+	{
+		var fs = getCurrentFuncStack();
+		if (fs)
+			fs.retVal = value_;
+		else
+;
+	};
+	Acts.prototype.CallExpression = function (unused)
+	{
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.ReturnValue = function (ret)
+	{
+		var fs = getOneAboveFuncStack();
+		if (fs)
+			ret.set_any(fs.retVal);
+		else
+			ret.set_int(0);
+	};
+	Exps.prototype.ParamCount = function (ret)
+	{
+		var fs = getCurrentFuncStack();
+		if (fs)
+			ret.set_int(fs.params.length);
+		else
+		{
+;
+			ret.set_int(0);
+		}
+	};
+	Exps.prototype.Param = function (ret, index_)
+	{
+		index_ = cr.floor(index_);
+		var fs = getCurrentFuncStack();
+		if (fs)
+		{
+			if (index_ >= 0 && index_ < fs.params.length)
+			{
+				ret.set_any(fs.params[index_]);
+			}
+			else
+			{
+;
+				ret.set_int(0);
+			}
+		}
+		else
+		{
+;
+			ret.set_int(0);
+		}
+	};
+	Exps.prototype.Call = function (ret, name_)
+	{
+		var fs = pushFuncStack();
+		fs.name = name_.toLowerCase();
+		fs.retVal = 0;
+		cr.clearArray(fs.params);
+		var i, len;
+		for (i = 2, len = arguments.length; i < len; i++)
+			fs.params.push(arguments[i]);
+		var ran = this.runtime.trigger(cr.plugins_.Function.prototype.cnds.OnFunction, this, fs.name);
+		if (isInPreview && !ran)
+		{
+;
+		}
+		popFuncStack();
+		ret.set_any(fs.retVal);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
 cr.plugins_.Keyboard = function(runtime)
 {
 	this.runtime = runtime;
@@ -16526,6 +16725,477 @@ cr.plugins_.Keyboard = function(runtime)
 	Exps.prototype.StringFromKeyCode = function (ret, kc)
 	{
 		ret.set_string(fixedStringFromCharCode(kc));
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.plugins_.List = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.List.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	instanceProto.onCreate = function()
+	{
+		if (this.runtime.isDomFree)
+		{
+			cr.logexport("[Construct 2] List plugin not supported on this platform - the object will not be created");
+			return;
+		}
+		this.elem = document.createElement("select");
+		this.elem.id = this.properties[7];
+		jQuery(this.elem).appendTo(this.runtime.canvasdiv ? this.runtime.canvasdiv : "body");
+		this.elem.title = this.properties[1];
+		this.elem.disabled = (this.properties[3] === 0);
+		if (this.properties[4] === 0)
+			this.elem.size = 2;
+		this.elem["multiple"] = (this.properties[5] !== 0);
+		this.autoFontSize = (this.properties[6] !== 0);
+		if (this.properties[2] === 0)
+		{
+			jQuery(this.elem).hide();
+			this.visible = false;
+		}
+		if (this.properties[0])
+		{
+			var itemsArr = this.properties[0].split(";");
+			var i, len, o;
+			for (i = 0, len = itemsArr.length; i < len; i++)
+			{
+				o = document.createElement("option");
+				o.text = itemsArr[i];
+				this.elem.add(o);
+			}
+		}
+		var self = this;
+		this.elem.onchange = function() {
+				self.runtime.trigger(cr.plugins_.List.prototype.cnds.OnSelectionChanged, self);
+			};
+		this.elem.onclick = function(e) {
+				e.stopPropagation();
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.List.prototype.cnds.OnClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		this.elem.ondblclick = function(e) {
+				e.stopPropagation();
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.List.prototype.cnds.OnDoubleClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		this.elem.addEventListener("touchstart", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchmove", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchend", function (e) {
+			e.stopPropagation();
+		}, false);
+		jQuery(this.elem).mousedown(function (e) {
+			e.stopPropagation();
+		});
+		jQuery(this.elem).mouseup(function (e) {
+			e.stopPropagation();
+		});
+		this.lastLeft = 0;
+		this.lastTop = 0;
+		this.lastRight = 0;
+		this.lastBottom = 0;
+		this.lastWinWidth = 0;
+		this.lastWinHeight = 0;
+		this.isVisible = true;
+		this.updatePosition(true);
+		this.runtime.tickMe(this);
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		var o = {
+			"tooltip": this.elem.title,
+			"disabled": !!this.elem.disabled,
+			"items": [],
+			"sel": []
+		};
+		var i, len;
+		var itemsarr = o["items"];
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			itemsarr.push(this.elem.options[i].text);
+		}
+		var selarr = o["sel"];
+		if (this.elem["multiple"])
+		{
+			for (i = 0, len = this.elem.length; i < len; i++)
+			{
+				if (this.elem.options[i].selected)
+					selarr.push(i);
+			}
+		}
+		else
+		{
+			selarr.push(this.elem["selectedIndex"]);
+		}
+		return o;
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.elem.title = o["tooltip"];
+		this.elem.disabled = o["disabled"];
+		var itemsarr = o["items"];
+		while (this.elem.length)
+			this.elem.remove(this.elem.length - 1);
+		var i, len, opt;
+		for (i = 0, len = itemsarr.length; i < len; i++)
+		{
+			opt = document.createElement("option");
+			opt.text = itemsarr[i];
+			this.elem.add(opt);
+		}
+		var selarr = o["sel"];
+		if (this.elem["multiple"])
+		{
+			for (i = 0, len = selarr.length; i < len; i++)
+			{
+				if (selarr[i] < this.elem.length)
+					this.elem.options[selarr[i]].selected = true;
+			}
+		}
+		else if (selarr.length >= 1)
+		{
+			this.elem["selectedIndex"] = selarr[0];
+		}
+	};
+	instanceProto.onDestroy = function ()
+	{
+		if (this.runtime.isDomFree)
+				return;
+		jQuery(this.elem).remove();
+		this.elem = null;
+	};
+	instanceProto.tick = function ()
+	{
+		this.updatePosition();
+	};
+	instanceProto.updatePosition = function (first)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		var left = this.layer.layerToCanvas(this.x, this.y, true);
+		var top = this.layer.layerToCanvas(this.x, this.y, false);
+		var right = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, true);
+		var bottom = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, false);
+		var rightEdge = this.runtime.width / this.runtime.devicePixelRatio;
+		var bottomEdge = this.runtime.height / this.runtime.devicePixelRatio;
+		if (!this.visible || !this.layer.visible || right <= 0 || bottom <= 0 || left >= rightEdge || top >= bottomEdge)
+		{
+			if (this.isVisible)
+				jQuery(this.elem).hide();
+			this.isVisible = false;
+			return;
+		}
+		if (left < 1)
+			left = 1;
+		if (top < 1)
+			top = 1;
+		if (right >= rightEdge)
+			right = rightEdge - 1;
+		if (bottom >= bottomEdge)
+			bottom = bottomEdge - 1;
+		var curWinWidth = window.innerWidth;
+		var curWinHeight = window.innerHeight;
+		if (!first && this.lastLeft === left && this.lastTop === top && this.lastRight === right && this.lastBottom === bottom && this.lastWinWidth === curWinWidth && this.lastWinHeight === curWinHeight)
+		{
+			if (!this.isVisible)
+			{
+				jQuery(this.elem).show();
+				this.isVisible = true;
+			}
+			return;
+		}
+		this.lastLeft = left;
+		this.lastTop = top;
+		this.lastRight = right;
+		this.lastBottom = bottom;
+		this.lastWinWidth = curWinWidth;
+		this.lastWinHeight = curWinHeight;
+		if (!this.isVisible)
+		{
+			jQuery(this.elem).show();
+			this.isVisible = true;
+		}
+		var offx = Math.round(left) + jQuery(this.runtime.canvas).offset().left;
+		var offy = Math.round(top) + jQuery(this.runtime.canvas).offset().top;
+		jQuery(this.elem).css("position", "absolute");
+		jQuery(this.elem).offset({left: offx, top: offy});
+		jQuery(this.elem).width(Math.round(right - left));
+		jQuery(this.elem).height(Math.round(bottom - top));
+		if (this.autoFontSize)
+			jQuery(this.elem).css("font-size", ((this.layer.getScale(true) / this.runtime.devicePixelRatio) - 0.2) + "em");
+	};
+	instanceProto.draw = function(ctx)
+	{
+	};
+	instanceProto.drawGL = function(glw)
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.CompareSelection = function (cmp_, x_)
+	{
+		return cr.do_cmp(this.elem["selectedIndex"], cmp_, x_);
+	};
+	Cnds.prototype.OnSelectionChanged = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnClicked = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnDoubleClicked = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.CompareSelectedText = function (x_, case_)
+	{
+		var selected_text = "";
+		var i = this.elem["selectedIndex"];
+		if (i < 0 || i >= this.elem.length)
+			return false;
+		selected_text = this.elem.options[i].text;
+		if (case_)
+			return selected_text == x_;
+		else
+			return cr.equals_nocase(selected_text, x_);
+	};
+	Cnds.prototype.CompareTextAt = function (i_, x_, case_)
+	{
+		var text = "";
+		var i = Math.floor(i_);
+		if (i < 0 || i >= this.elem.length)
+			return false;
+		text = this.elem.options[i].text;
+		if (case_)
+			return text == x_;
+		else
+			return cr.equals_nocase(text,x_);
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Select = function (i)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem["selectedIndex"] = i;
+	};
+	Acts.prototype.SetTooltip = function (text)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.title = text;
+	};
+	Acts.prototype.SetVisible = function (vis)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.visible = (vis !== 0);
+	};
+	Acts.prototype.SetEnabled = function (en)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.disabled = (en === 0);
+	};
+	Acts.prototype.SetFocus = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.focus();
+	};
+	Acts.prototype.SetBlur = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.blur();
+	};
+	Acts.prototype.SetCSSStyle = function (p, v)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		jQuery(this.elem).css(p, v);
+	};
+	Acts.prototype.AddItem = function (text_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		var o = document.createElement("option");
+		o.text = text_;
+		this.elem.add(o);
+	};
+	Acts.prototype.AddItemAt = function (index_, text_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		index_ = Math.floor(index_);
+		if (index_ < 0)
+			index_ = 0;
+		var o = document.createElement("option");
+		o.text = text_;
+		if (index_ >= this.elem.length)
+			this.elem.add(o);
+		else
+		{
+			this.elem.add(o, this.elem.options[index_]);
+		}
+	};
+	Acts.prototype.Remove = function (index_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		index_ = Math.floor(index_);
+		this.elem.remove(index_);
+	};
+	Acts.prototype.SetItemText = function (index_, text_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		index_ = Math.floor(index_);
+		if (index_ < 0 || index_ >= this.elem.length)
+			return;
+		this.elem.options[index_].text = text_;
+	};
+	Acts.prototype.Clear = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.innerHTML = "";
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.ItemCount = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		ret.set_int(this.elem.length);
+	};
+	Exps.prototype.ItemTextAt = function (ret, i)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		i = Math.floor(i);
+		if (i < 0 || i >= this.elem.length)
+		{
+			ret.set_string("");
+			return;
+		}
+		ret.set_string(this.elem.options[i].text);
+	};
+	Exps.prototype.SelectedIndex = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		ret.set_int(this.elem["selectedIndex"]);
+	};
+	Exps.prototype.SelectedText = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		var i = this.elem["selectedIndex"];
+		if (i < 0 || i >= this.elem.length)
+		{
+			ret.set_string("");
+			return;
+		}
+		ret.set_string(this.elem.options[i].text);
+	};
+	Exps.prototype.SelectedCount = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		var i, len, count = 0;
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			if (this.elem.options[i].selected)
+				count++;
+		}
+		ret.set_int(count);
+	};
+	Exps.prototype.SelectedIndexAt = function (ret, index_)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		index_ = Math.floor(index_);
+		var i, len, count = 0, result = 0;
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			if (this.elem.options[i].selected)
+			{
+				if (count === index_)
+				{
+					result = i;
+					break;
+				}
+				count++;
+			}
+		}
+		ret.set_int(result);
+	};
+	Exps.prototype.SelectedTextAt = function (ret, index_)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		index_ = Math.floor(index_);
+		var i, len, count = 0, result = "";
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			if (this.elem.options[i].selected)
+			{
+				if (count === index_)
+				{
+					result = this.elem.options[i].text;
+					break;
+				}
+				count++;
+			}
+		}
+		ret.set_string(result);
 	};
 	pluginProto.exps = new Exps();
 }());
@@ -16805,6 +17475,1733 @@ cr.plugins_.Mouse = function(runtime)
 	{
 		ret.set_float(this.mouseYcanvas);
 	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.plugins_.Multiplayer = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.Multiplayer.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var isSupported = false;
+	var serverlist = [];
+	instanceProto.onCreate = function()
+	{
+		this.mp = null;
+		isSupported = window["C2Multiplayer_IsSupported"]();
+		if (isSupported && typeof window["C2Multiplayer"] !== "undefined")
+			this.mp = new window["C2Multiplayer"]();
+		this.signallingUrl = "";
+		this.errorMsg = "";
+		this.peerID = "";
+		this.peerAlias = "";
+		this.leaveReason = "";
+		this.msgContent = "";
+		this.msgTag = "";
+		this.msgFromId = "";
+		this.msgFromAlias = "";
+		this.typeToRo = {};
+		this.instToPeer = {};
+		this.peerToInst = {};
+		this.gameInstanceList = null;
+		this.roomList = null;
+		this.wakerWorker = null;
+		this.inputPredictObjects = [];
+		this.trackObjects = [];				// objects to keep a history for
+		this.objectHistories = {};
+		var self = this;
+		if (isSupported)
+		{
+			this.mp["onserverlist"] = function (servers) {
+				serverlist = servers;
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnServerList, self);
+			};
+			this.mp["onsignallingerror"] = function (e) {
+				self.setError(e);
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnSignallingError, self);
+			};
+			this.mp["onsignallingclose"] = function () {
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnSignallingDisconnected, self);
+				self.signallingUrl = "";
+			};
+			this.mp["onsignallingwelcome"] = function () {
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnSignallingConnected, self);
+			};
+			this.mp["onsignallinglogin"] = function () {
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnSignallingLoggedIn, self);
+			};
+			this.mp["onsignallingjoin"] = function (became_host) {
+				self.instToPeer = {};
+				self.peerToInst = {};
+				self.trackObjects.length = 0;
+				self.inputPredictObjects.length = 0;
+				self.objectHistories = {};
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnSignallingJoinedRoom, self);
+				if (self.runtime.isSuspended && became_host)
+				{
+					self.wakerWorker.postMessage("start");
+				}
+			};
+			this.mp["onsignallingleave"] = function () {
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnSignallingLeftRoom, self);
+			};
+			this.mp["onsignallingkicked"] = function () {
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnSignallingKicked, self);
+			};
+			this.mp["onbeforeclientupdate"] = function () {
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnClientUpdate, self);
+			};
+			this.mp["onpeeropen"] = function (peer) {
+				self.peerID = peer["id"];
+				self.peerAlias = peer["alias"];
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnPeerConnected, self);
+			};
+			this.mp["onpeerclose"] = function (peer, reason) {
+				self.peerID = peer["id"];
+				self.peerAlias = peer["alias"];
+				self.leaveReason = reason || "unknown";
+				var inst = self.getAssociatedInstanceForPeer(peer);
+				if (inst)
+				{
+					var ro = self.typeToRo[inst.type];
+					if (ro)
+						ro["removeObjectNid"](peer["nid"]);
+					self.runtime.DestroyInstance(inst);
+				}
+				if (self.peerToInst.hasOwnProperty(peer["id"]))
+					delete self.peerToInst[peer["id"]];
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnPeerDisconnected, self);
+			};
+			this.mp["onpeermessage"] = function (peer, o) {
+				self.msgTag = o["t"];
+				if (o["f"])
+					self.msgFromId = o["f"];
+				else
+					self.msgFromId = peer["id"];
+				self.msgFromAlias = self.mp["getAliasFromId"](self.msgFromId);
+				self.msgContent = o["m"];
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnAnyPeerMessage, self);
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnPeerMessage, self);
+			};
+			this.mp["onsignallinginstancelist"] = function (list) {
+				self.gameInstanceList = list;
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnGameInstanceList, self);
+			};
+			this.mp["onsignallingroomlist"] = function (list) {
+				self.roomList = list;
+				self.runtime.trigger(cr.plugins_.Multiplayer.prototype.cnds.OnRoomList, self);
+			};
+			this.mp["ongetobjectcount"] = function (obj) {
+				return obj.instances.length;
+			};
+			this.mp["ongetobjectvalue"] = function (obj, index, nv) {
+				if (!nv)
+					return obj.instances[index].uid;
+				var tag = nv["tag"];
+				var inst = obj.instances[index];
+				var value, peer;
+				switch (tag) {
+				case "x":
+					return inst.x;
+				case "y":
+					return inst.y;
+				case "a":
+					return inst.angle;
+				case "iv":
+					if (nv["clientvaluetag"])
+					{
+						peer = self.instToPeer[inst.uid];
+						if (peer && self.mp["me"] !== peer && !peer["wasRemoved"] && peer["hasClientState"](nv["clientvaluetag"]))
+						{
+							return peer["getInterpClientState"](nv["clientvaluetag"]);
+						}
+					}
+					value = inst.instance_vars[nv["userdata"]];
+					if (typeof value === "number")
+						return value;
+					else
+						return 0;
+				default:
+					return 0;
+				}
+			};
+			this.mp["oninstancedestroyed"] = function (ro, nid, timestamp)
+			{
+				var userdata = ro["userdata"];
+				var instmap = userdata.instmap;		// map NID to C2 instance
+				if (!userdata.deadmap)
+					userdata.deadmap = {};
+				var deadmap = userdata.deadmap;
+				deadmap[nid] = timestamp;
+				if (!instmap)
+				{
+					return;
+				}
+				if (instmap.hasOwnProperty(nid))
+				{
+					var inst = instmap[nid];
+					if (inst)
+					{
+						self.runtime.DestroyInstance(inst);
+					}
+					delete instmap[nid];
+				}
+			};
+			this.runtime.addDestroyCallback(function (inst)
+			{
+				var p;
+				var uid = inst.uid;
+				if (self.instToPeer.hasOwnProperty(uid))
+					delete self.instToPeer[uid];
+				for (p in self.peerToInst)
+				{
+					if (self.peerToInst.hasOwnProperty(p))
+					{
+						if (self.peerToInst[p] === inst)
+						{
+							delete self.peerToInst[p];
+							break;
+						}
+					}
+				}
+				if (self.objectHistories.hasOwnProperty(uid))
+					delete self.objectHistories[uid];
+				var i = self.inputPredictObjects.indexOf(inst);
+				if (i > -1)
+					self.inputPredictObjects.splice(i, 1);
+				i = self.trackObjects.indexOf(inst);
+				if (i > -1)
+					self.trackObjects.splice(i, 1);
+				self.mp["removeObjectId"](uid);
+			});
+			this.wakerWorker = new Worker("waker.js");
+			this.wakerWorker.addEventListener("message", function (e) {
+				if (e.data === "tick" && self.runtime.isSuspended)
+				{
+					self.runtime.tick(true);
+				}
+			}, false);
+			this.wakerWorker.postMessage("");
+		}
+		this.runtime.addSuspendCallback(function (s) {
+			if (!isSupported || !self.mp["isHost"]())
+				return;
+			if (s)
+			{
+				self.wakerWorker.postMessage("start");
+			}
+			else
+			{
+				self.wakerWorker.postMessage("stop");
+			}
+		});
+		this.runtime.pretickMe(this);
+	};
+	instanceProto.getAssociatedInstanceForPeer = function (peer)
+	{
+		var peer_id = peer["id"];
+		if (this.peerToInst.hasOwnProperty(peer_id))
+			return this.peerToInst[peer_id];
+		else
+			return null;
+	};
+	instanceProto.isInputPredicting = function (inst)
+	{
+		return this.inputPredictObjects.indexOf(inst) >= 0;
+	};
+	instanceProto.pretick = function ()
+	{
+		if (!isSupported)
+			return;
+		this.mp["tick"](this.runtime.dt1);
+		this.trackObjectHistories();
+		var i, len, ro;
+		if (this.mp["isInRoom"]() && !this.mp["isHost"]())
+		{
+			for (i = 0, len = this.mp["registeredObjects"].length; i < len; ++i)
+			{
+				ro = this.mp["registeredObjects"][i];
+				this.updateRegisteredObject(ro);
+			}
+		}
+	};
+	var netInstToRemove = [];
+	instanceProto.updateRegisteredObject = function (ro)
+	{
+		ro["tick"]();
+		var type = ro["obj"];
+		var count = ro["getCount"]();
+		var netvalues = ro["netvalues"];
+		var userdata = ro["userdata"];
+		if (!userdata.instmap)
+			userdata.instmap = {};
+		var instmap = userdata.instmap;		// map NID to C2 instance
+		var deadmap = userdata.deadmap;
+		var simTime = ro["simTime"];
+		var i, netinst, nid, inst, peer, nv, iv, value, j, p, created, lenj = netvalues.length;
+		var p;
+		for (p in instmap)
+		{
+			if (instmap.hasOwnProperty(p))
+			{
+				inst = instmap[p];
+				if (!this.runtime.getObjectByUID(inst.uid))
+					delete instmap[p];
+			}
+		}
+		if (deadmap)
+		{
+			for (p in deadmap)
+			{
+				if (deadmap.hasOwnProperty(p))
+				{
+					if (deadmap[p] < simTime - 3000)
+						delete deadmap[p];
+				}
+			}
+		}
+		for (i = 0; i < count; ++i)
+		{
+			netinst = ro["getNetInstAt"](i);
+			nid = netinst["nid"];
+			if (deadmap && deadmap[nid] >= simTime - 3000)
+			{
+				netInstToRemove.push(netinst);
+				if (instmap.hasOwnProperty(nid))
+				{
+					this.runtime.DestroyInstance(instmap[nid]);
+					delete instmap[nid];
+				}
+				continue;
+			}
+			if (instmap.hasOwnProperty(nid))
+			{
+				inst = instmap[nid];
+				created = false;
+			}
+			else
+			{
+				peer = this.mp["getPeerByNid"](nid);
+				if (peer)
+				{
+					this.peerID = peer["id"];
+					this.peerAlias = peer["alias"];
+				}
+				else
+				{
+					if (ro["hasOverriddenNids"])
+					{
+						continue;
+					}
+					this.peerID = "";
+					this.peerAlias = "";
+				}
+				inst = this.runtime.createInstance(type, this.runtime.running_layout.layers[type.default_layerindex], -1000, -1000);
+				instmap[nid] = inst;
+				created = true;
+			}
+			if (netinst["isTimedOut"](simTime))
+			{
+				netInstToRemove.push(netinst);
+				if (instmap.hasOwnProperty(nid))
+					delete instmap[nid];
+				this.runtime.DestroyInstance(inst);
+				continue;
+			}
+			if (this.isInputPredicting(inst))
+			{
+				this.correctInputPrediction(inst, netinst, netvalues, simTime);
+			}
+			else
+			{
+				for (j = 0; j < lenj; ++j)
+				{
+					value = netinst["getInterp"](simTime, j);
+					nv = netvalues[j];
+					switch (nv["tag"]) {
+					case "x":
+						inst.x = value;
+						inst.set_bbox_changed();
+						break;
+					case "y":
+						inst.y = value;
+						inst.set_bbox_changed();
+						break;
+					case "a":
+						inst.angle = value;
+						inst.set_bbox_changed();
+						break;
+					case "iv":
+						iv = nv["userdata"];
+						if (iv > inst.instance_vars.length || typeof inst.instance_vars[iv] !== "number")
+							break;
+						inst.instance_vars[iv] = value;
+						break;
+					}
+				}
+			}
+			if (created)
+			{
+				this.runtime.trigger(Object.getPrototypeOf(type.plugin).cnds.OnCreated, inst);
+			}
+		}
+		for (i = 0, count = netInstToRemove.length; i < count; ++i)
+		{
+			ro["removeNetInstance"](netInstToRemove[i]);
+		}
+		netInstToRemove.length = 0;
+	};
+	instanceProto.trackObjectHistories = function ()
+	{
+		var hosttime = this.mp["getHostInputArrivalTime"]();
+		var i, len;
+		for (i = 0, len = this.trackObjects.length; i < len; ++i)
+		{
+			this.trackObjectHistory(this.trackObjects[i], hosttime);
+		}
+	};
+	function ObjectHistory(inst_)
+	{
+		this.inst = inst_;
+		this.history = [];
+	};
+	ObjectHistory.prototype.getLastDelta = function (tag, i)
+	{
+		if (this.history.length < 2)
+			return 0;		// not yet enough data
+		var from = this.history[this.history.length - 2];
+		var to = this.history[this.history.length - 1];
+		switch (tag) {
+		case "x":
+			return to.x - from.x;
+		case "y":
+			return to.y - from.y;
+		case "a":
+			return to.angle - from.angle;
+		case "iv":
+			return to.ivs[i] - from.ivs[i];
+		}
+		return 0;
+	};
+	ObjectHistory.prototype.getInterp = function (tag, index, time, interp)
+	{
+		var i, len, h;
+		var prev = null;
+		var next = null;
+		for (i = 0, len = this.history.length; i < len; ++i)
+		{
+			h = this.history[i];
+			if (h.timestamp < time)
+				prev = h;
+			else
+			{
+				if (i + 1 < this.history.length)
+					next = this.history[i + 1];
+				break;
+			}
+		}
+		if (!prev)
+			return (void 0);
+		var prev_value = 0;
+		switch (tag) {
+		case "x":
+			prev_value = prev.x;
+			break;
+		case "y":
+			prev_value = prev.y;
+			break;
+		case "a":
+			prev_value = prev.angle;
+			break;
+		case "iv":
+			prev_value = prev.ivs[index];
+			break;
+		}
+		if (!next)
+			return prev_value;
+		var next_value = prev_value;
+		switch (tag) {
+		case "x":
+			next_value = next.x;
+			break;
+		case "y":
+			next_value = next.y;
+			break;
+		case "a":
+			next_value = next.angle;
+			break;
+		case "iv":
+			next_value = next.ivs[index];
+			break;
+		}
+		var x = cr.unlerp(prev.timestamp, next.timestamp, time);
+		return window["interpNetValue"](interp, prev_value, next_value, x, false);
+	};
+	ObjectHistory.prototype.applyCorrection = function (tag, index, correction)
+	{
+		var i, len, h;
+		for (i = 0, len = this.history.length; i < len; ++i)
+		{
+			h = this.history[i];
+			switch (tag) {
+			case "x":
+				h.x += correction;
+				break;
+			case "y":
+				h.y += correction;
+				break;
+			case "a":
+				h.angle += correction;
+				break;
+			case "iv":
+				h.ivs[index] += correction;
+				break;
+			}
+		};
+	};
+	function ObjectHistoryEntry(oh_)
+	{
+		this.oh = oh_;
+		this.timestamp = 0;
+		this.x = 0;
+		this.y = 0;
+		this.angle = 0;
+		this.ivs = [];
+	};
+	var history_cache = [];
+	function allocHistoryEntry(oh_)
+	{
+		var ret;
+		if (history_cache.length)
+		{
+			ret = history_cache.pop();
+			ret.oh = oh_;
+			return ret;
+		}
+		else
+			return new ObjectHistoryEntry(oh_);
+	};
+	function freeHistoryEntry(he)
+	{
+		he.ivs.length = 0;
+		if (history_cache.length < 1000)
+			history_cache.push(he);
+	};
+	instanceProto.trackObjectHistory = function (inst, hosttime)
+	{
+		if (!this.objectHistories.hasOwnProperty(inst.uid))
+			this.objectHistories[inst.uid] = new ObjectHistory(inst);
+		var oh = this.objectHistories[inst.uid];
+		var he = allocHistoryEntry(oh);
+		he.timestamp = hosttime;
+		he.x = inst.x;
+		he.y = inst.y;
+		he.angle = inst.angle;
+		cr.shallowAssignArray(he.ivs, inst.instance_vars);
+		oh.history.push(he);
+		while (oh.history.length > 0 && oh.history[0].timestamp <= (hosttime - 2000))
+			freeHistoryEntry(oh.history.shift());
+	};
+	var clientXerror = 0;
+	var clientYerror = 0;
+	var hostX = 0;
+	var hostY = 0;
+	function linearCorrect(current, target, delta, position, isPlatformBehavior)
+	{
+		var diff = target - current;
+		if (diff === 0)
+			return 0;
+		var abs_diff = cr.abs(diff);
+		if (abs_diff <= cr.abs(delta / 10) || (position && (abs_diff < 1 || abs_diff >= 1000)))
+			return diff;
+		var minimum_correction = abs_diff / 50;
+		if (isPlatformBehavior)
+			minimum_correction = cr.max(minimum_correction, 1);
+		var delta_correction = cr.abs(delta / 5);
+		if (position && abs_diff >= 10)
+		{
+			minimum_correction = abs_diff / 10;
+			delta_correction = cr.abs(delta / 2);
+		}
+		var abs_correction = cr.max(minimum_correction, delta_correction);
+		if (abs_correction > abs_diff)
+			abs_correction = abs_diff;
+		if (diff > 0)
+			return abs_correction;
+		else
+			return -abs_correction;
+	};
+	instanceProto.correctInputPrediction = function (inst, netinst, netvalues, simTime)
+	{
+		if (!this.objectHistories.hasOwnProperty(inst.uid))
+			return;		// no data yet, leave as is
+		var oh = this.objectHistories[inst.uid];
+		var j, latestupdate, host_value, my_value, nv, diff, iv, tag, interp, userdata, correction;
+		var lenj = netvalues.length;
+		var position_delta = cr.distanceTo(0, 0, oh.getLastDelta("x"), oh.getLastDelta("y"));
+		var isPlatformBehavior = !!inst.extra["isPlatformBehavior"];
+		for (j = 0; j < lenj; ++j)
+		{
+			nv = netvalues[j];
+			tag = nv["tag"];
+			userdata = nv["userdata"];
+			interp = nv["interp"];
+			latestupdate = netinst["getLatestUpdate"]();
+			if (!latestupdate)
+				continue;		// no data from server
+			host_value = latestupdate.data[j];
+			my_value = oh.getInterp(tag, userdata, latestupdate.timestamp, interp);
+			if (typeof my_value === "undefined")
+				continue;		// no local history yet
+			correction = 0;
+			switch (tag) {
+			case "x":
+				correction = linearCorrect(my_value, host_value, position_delta, true, isPlatformBehavior);
+				if (correction !== 0)
+				{
+					inst.x += correction;
+					inst.set_bbox_changed();
+				}
+				clientXerror = host_value - my_value + correction;
+				hostX = host_value;
+				break;
+			case "y":
+				correction = linearCorrect(my_value, host_value, position_delta, true, isPlatformBehavior);
+				if (correction !== 0)
+				{
+					inst.y += correction;
+					inst.set_bbox_changed();
+				}
+				clientYerror = host_value - my_value + correction;
+				hostY = host_value;
+				break;
+			case "a":
+				correction = cr.anglelerp(my_value, host_value, 0.5) - my_value;
+				if (correction !== 0)
+				{
+					inst.angle += correction;
+					inst.set_bbox_changed();
+				}
+				break;
+			case "iv":
+				iv = userdata;
+				if (iv > inst.instance_vars.length || typeof inst.instance_vars[iv] !== "number")
+					break;
+				if (!nv["clientvaluetag"])
+					inst.instance_vars[iv] = netinst["getInterp"](simTime, j);
+				break;
+			}
+			if (correction !== 0)
+				oh.applyCorrection(tag, userdata, correction);
+		}
+	};
+	instanceProto.setError = function (e)
+	{
+		if (!e)
+			this.errorMsg = "unknown error";
+		else if (typeof e === "string")
+			this.errorMsg = e;
+		else if (typeof e.message === "string")
+			this.errorMsg = e.message;
+		else if (typeof e.details === "string")
+			this.errorMsg = e.details;
+		else if (typeof e.data === "string")
+			this.errorMsg = e.data;
+		else if (typeof e.type === "string")
+			this.errorMsg = e.type;
+		else
+			this.errorMsg = "error";
+	};
+	instanceProto.onDestroy = function ()
+	{
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return {
+		};
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.OnServerList = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSignallingError = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSignallingConnected = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSignallingDisconnected = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSignallingLoggedIn = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSignallingJoinedRoom = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSignallingLeftRoom = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSignallingKicked = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnPeerConnected = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnPeerDisconnected = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.SignallingIsConnected = function ()
+	{
+		return isSupported && this.mp["isConnected"]();
+	};
+	Cnds.prototype.SignallingIsLoggedIn = function ()
+	{
+		return isSupported && this.mp["isLoggedIn"]();
+	};
+	Cnds.prototype.SignallingIsInRoom = function ()
+	{
+		return isSupported && this.mp["isInRoom"]();
+	};
+	Cnds.prototype.IsHost = function ()
+	{
+		return isSupported && this.mp["isHost"]();
+	};
+	Cnds.prototype.IsSupported = function ()
+	{
+		return isSupported;
+	};
+	Cnds.prototype.OnPeerMessage = function (tag_)
+	{
+		return this.msgTag === tag_;
+	};
+	Cnds.prototype.OnAnyPeerMessage = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnClientUpdate = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnGameInstanceList = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnRoomList = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsReadyForInput = function ()
+	{
+		if (!isSupported)
+			return false;
+		return this.mp["isReadyForInput"]();
+	};
+	Cnds.prototype.ComparePeerCount = function (cmp_, x_)
+	{
+		var peercount = 0;
+		if (isSupported)
+			peercount = this.mp["getPeerCount"]();
+		return cr.do_cmp(peercount, cmp_, x_);
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.RequestServerList = function (url_)
+	{
+		if (!isSupported)
+			return;
+		this.mp["requestServerList"](url_);
+	};
+	Acts.prototype.SignallingConnect = function (url_)
+	{
+		if (!isSupported || this.mp["isConnected"]())
+			return;
+		this.signallingUrl = url_;
+		this.mp["signallingConnect"](url_);
+	};
+	Acts.prototype.SignallingDisconnect = function ()
+	{
+		if (!isSupported || !this.mp["isConnected"]())
+			return;
+		this.mp["signallingDisconnect"]();
+	};
+	Acts.prototype.AddICEServer = function (url_, username_, credential_)
+	{
+		if (!isSupported)
+			return;
+		var o = {
+			"urls": url_
+		};
+		if (username_)
+			o["username"] = username_;
+		if (credential_)
+			o["credential"] = credential_;
+		this.mp["mergeIceServerList"]([o]);
+	};
+	Acts.prototype.SignallingLogin = function (alias_)
+	{
+		if (!isSupported || !this.mp["isConnected"] || this.mp["isLoggedIn"]())
+			return;
+		this.mp["signallingLogin"](alias_);
+	};
+	Acts.prototype.SignallingJoinRoom = function (game_, instance_, room_, max_clients_)
+	{
+		if (!isSupported || !this.mp["isLoggedIn"]() || this.mp["isInRoom"]())
+			return;
+		this.mp["signallingJoinGameRoom"](game_, instance_, room_, max_clients_);
+	};
+	Acts.prototype.SignallingAutoJoinRoom = function (game_, instance_, room_, max_clients_, locking_)
+	{
+		if (!isSupported || !this.mp["isLoggedIn"]() || this.mp["isInRoom"]())
+			return;
+		this.mp["signallingAutoJoinGameRoom"](game_, instance_, room_, max_clients_, (locking_ === 0));
+	};
+	Acts.prototype.SignallingLeaveRoom = function ()
+	{
+		if (!isSupported || !this.mp["isInRoom"]())
+			return;
+		this.mp["signallingLeaveRoom"]();
+	};
+	Acts.prototype.DisconnectRoom = function ()
+	{
+		if (!isSupported)
+			return;
+		this.mp["disconnectRoom"](true);
+	};
+	function modeToDCType(mode_)
+	{
+		switch (mode_) {
+		case 0:		// reliable ordered
+			return "o";
+		case 1:		// reliable unordered
+			return "r";
+		case 2:		// unreliable
+			return "u";
+		default:
+			return "o";
+		}
+	};
+	Acts.prototype.SendPeerMessage = function (peerid_, tag_, message_, mode_)
+	{
+		if (!isSupported)
+			return;
+		if (!peerid_)
+			peerid_ = this.mp["getHostID"]();
+		var peer = this.mp["getPeerById"](peerid_);
+		if (!peer)
+			return;
+		peer["send"](modeToDCType(mode_), JSON.stringify({
+			"c": "m",			// command: message
+			"t": tag_,			// tag
+			"m": message_		// content
+		}));
+	};
+	Acts.prototype.HostBroadcastMessage = function (from_id_, tag_, message_, mode_)
+	{
+		if (!isSupported)
+			return;
+		var skip = this.mp["getPeerById"](from_id_);
+		var o = {
+			"c": "m",			// command: message
+			"t": tag_,			// tag
+			"f": (from_id_ || this.mp["getHostID"]()),
+			"m": message_		// content
+		};
+		this.mp["hostBroadcast"](modeToDCType(mode_), JSON.stringify(o), skip);
+	};
+	Acts.prototype.SimulateLatency = function (latency_, pdv_, loss_)
+	{
+		if (!isSupported)
+			return;
+		this.mp["setLatencySimulation"](latency_ * 1000, pdv_ * 1000, loss_);
+	};
+	instanceProto.doSyncObject = function (type_, data_, precision_, bandwidth_)
+	{
+		if (!isSupported)
+			return;
+		var ro = this.mp["registerObject"](type_, type_.sid, bandwidth_);
+		if (data_ === 1)		// position only
+		{
+			ro["addValue"](this.mp["INTERP_LINEAR"], precision_, "x");		// for x
+			ro["addValue"](this.mp["INTERP_LINEAR"], precision_, "y");		// for y
+		}
+		else if (data_ === 2)	// angle only
+		{
+			ro["addValue"](this.mp["INTERP_ANGULAR"], precision_, "a");		// for angle
+		}
+		else if (data_ === 3)	// position and angle
+		{
+			ro["addValue"](this.mp["INTERP_LINEAR"], precision_, "x");		// for x
+			ro["addValue"](this.mp["INTERP_LINEAR"], precision_, "y");		// for y
+			ro["addValue"](this.mp["INTERP_ANGULAR"], precision_, "a");		// for angle
+		}
+		this.typeToRo[type_] = ro;
+	};
+	Acts.prototype.SyncObject = function (type_, data_, precision_, bandwidth_)
+	{
+		if (!isSupported)
+			return;
+		var i, len;
+		if (type_.is_family)
+		{
+			for (i = 0, len = type_.members.length; i < len; ++i)
+			{
+				this.doSyncObject(type_.members[i], data_, precision_, bandwidth_);
+			}
+		}
+		else
+		{
+			this.doSyncObject(type_, data_, precision_, bandwidth_);
+		}
+	};
+	var prompted_bad_sync = false;
+	instanceProto.doSyncObjectInstanceVar = function (type_, var_, precision_, interp_, clientvaluetag_)
+	{
+		if (!isSupported)
+			return;
+		var ro = this.typeToRo[type_];
+		if (!ro)
+		{
+			return;
+		}
+		var ip = this.mp["INTERP_NONE"];
+		if (interp_ === 1)		// linear interpolation
+			ip = this.mp["INTERP_LINEAR"];
+		else if (interp_ === 2)	// angular interpolation
+			ip = this.mp["INTERP_ANGULAR"];
+		ro["addValue"](ip, precision_, "iv", var_, clientvaluetag_);
+	};
+	Acts.prototype.SyncObjectInstanceVar = function (type_, var_, precision_, interp_, clientvaluetag_)
+	{
+		if (!isSupported)
+			return;
+		var i, len, t;
+		if (type_.is_family)
+		{
+			for (i = 0, len = type_.members.length; i < len; ++i)
+			{
+				t = type_.members[i];
+				this.doSyncObjectInstanceVar(t, var_ + t.family_var_map[type_.family_index], precision_, interp_, clientvaluetag_);
+			}
+		}
+		else
+		{
+			this.doSyncObjectInstanceVar(type_, var_, precision_, interp_, clientvaluetag_);
+		}
+	};
+	Acts.prototype.AssociateObjectWithPeer = function (type_, peerid_)
+	{
+		if (!isSupported)
+			return;
+		var inst = type_.getFirstPicked();
+		if (!inst)
+			return;
+		var ro = this.typeToRo[type_];
+		if (!ro)
+			return;
+		var peer = this.mp["getPeerById"](peerid_);
+		if (!peer)
+			return;
+		if (this.mp["isHost"]())
+		{
+			ro["overrideNid"](inst.uid, peer["nid"]);
+			if (this.trackObjects.indexOf(inst) === -1)		// only add if not already tracked
+				this.trackObjects.push(inst);
+		}
+		this.instToPeer[inst.uid] = peer;
+		this.peerToInst[peer["id"]] = inst;
+	};
+	Acts.prototype.SetClientState = function (tag, x)
+	{
+		if (!isSupported)
+			return;
+		this.mp["setClientState"](tag, x);
+	};
+	Acts.prototype.AddClientInputValue = function (tag, precision, interpolation)
+	{
+		if (!isSupported)
+			return;
+		this.mp["addClientInputValue"](tag, precision, interpolation);
+	};
+	Acts.prototype.InputPredictObject = function (obj)
+	{
+		if (!isSupported || !obj)
+			return;
+		if (this.mp["isHost"]())
+			return;		// host mustn't input predict anything
+		var inst = obj.getFirstPicked();
+		if (!inst)
+			return;
+		if (this.inputPredictObjects.indexOf(inst) >= 0)
+			return;		// already input predicted
+		inst.extra["inputPredicted"] = true;
+		this.trackObjects.push(inst);
+		this.inputPredictObjects.push(inst);
+	};
+	Acts.prototype.SignallingRequestGameInstanceList = function (game_)
+	{
+		if (!isSupported)
+			return;
+		this.mp["signallingRequestGameInstanceList"](game_);
+	};
+	Acts.prototype.SignallingRequestRoomList = function (game_, instance_, which_)
+	{
+		if (!isSupported)
+			return;
+		var whichstr = "all";
+		if (which_ === 1)
+			whichstr = "unlocked";
+		else if (which_ === 2)
+			whichstr = "available";
+		this.mp["signallingRequestRoomList"](game_, instance_, whichstr);
+	};
+	Acts.prototype.SetBandwidthProfile = function (profile)
+	{
+		if (!isSupported)
+			return;
+		var updateRate, delay;
+		if (profile === 0)		// Internet
+		{
+			updateRate = 30;	// 30 Hz updates
+			delay = 80;			// 80 ms buffer
+		}
+		else
+		{
+			updateRate = 60;	// 60 Hz updates
+			delay = 40;			// 40ms buffer
+		}
+		this.mp["setBandwidthSettings"](updateRate, delay);
+	};
+	Acts.prototype.KickPeer = function (peerid_, reason_)
+	{
+		if (!isSupported)
+			return;
+		if (!this.mp["isHost"]())
+			return;
+		if (peerid_ === this.mp["getMyID"]())
+			return;		// can't kick self
+		var peer = this.mp["getPeerById"](peerid_);
+		if (!peer)
+			return;
+		peer["remove"](reason_, true /* isKick */);
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.ServerListCount = function (ret)
+	{
+		ret.set_int(serverlist.length);
+	};
+	Exps.prototype.ServerListURLAt = function (ret, i)
+	{
+		i = Math.floor(i);
+		if (i < 0 || i >= serverlist.length)
+			ret.set_string("");
+		else
+			ret.set_string(serverlist[i]["url"]);
+	};
+	Exps.prototype.ServerListNameAt = function (ret, i)
+	{
+		i = Math.floor(i);
+		if (i < 0 || i >= serverlist.length)
+			ret.set_string("");
+		else
+			ret.set_string(serverlist[i]["name"]);
+	};
+	Exps.prototype.ServerListOperatorAt = function (ret, i)
+	{
+		i = Math.floor(i);
+		if (i < 0 || i >= serverlist.length)
+			ret.set_string("");
+		else
+			ret.set_string(serverlist[i]["operator"]);
+	};
+	Exps.prototype.ServerListWebsiteAt = function (ret, i)
+	{
+		i = Math.floor(i);
+		if (i < 0 || i >= serverlist.length)
+			ret.set_string("");
+		else
+			ret.set_string(serverlist[i]["operator_website"]);
+	};
+	Exps.prototype.SignallingURL = function (ret)
+	{
+		ret.set_string(this.signallingUrl);
+	};
+	Exps.prototype.SignallingVersion = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["sigserv_version"] : "");
+	};
+	Exps.prototype.SignallingName = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["sigserv_name"] : "");
+	};
+	Exps.prototype.SignallingOperator = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["sigserv_operator"] : "");
+	};
+	Exps.prototype.SignallingMOTD = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["sigserv_motd"] : "");
+	};
+	Exps.prototype.MyAlias = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["getMyAlias"]() : "");
+	};
+	Exps.prototype.CurrentGame = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["getCurrentGame"]() : "");
+	};
+	Exps.prototype.CurrentInstance = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["getCurrentGameInstance"]() : "");
+	};
+	Exps.prototype.CurrentRoom = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["getCurrentRoom"]() : "");
+	};
+	Exps.prototype.ErrorMessage = function (ret)
+	{
+		ret.set_string(this.errorMsg);
+	};
+	Exps.prototype.MyID = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["getMyID"]() : "");
+	};
+	Exps.prototype.PeerID = function (ret)
+	{
+		ret.set_string(this.peerID);
+	};
+	Exps.prototype.PeerAlias = function (ret)
+	{
+		ret.set_string(this.peerAlias);
+	};
+	Exps.prototype.HostID = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["getHostID"]() : "");
+	};
+	Exps.prototype.HostAlias = function (ret)
+	{
+		ret.set_string(isSupported ? this.mp["getHostAlias"]() : "");
+	};
+	Exps.prototype.Message = function (ret)
+	{
+		ret.set_string(this.msgContent);
+	};
+	Exps.prototype.Tag = function (ret)
+	{
+		ret.set_string(this.msgTag);
+	};
+	Exps.prototype.FromID = function (ret)
+	{
+		ret.set_string(this.msgFromId);
+	};
+	Exps.prototype.FromAlias = function (ret)
+	{
+		ret.set_string(this.msgFromAlias);
+	};
+	Exps.prototype.PeerAliasFromID = function (ret, id_)
+	{
+		ret.set_string(isSupported ? this.mp["getAliasFromId"](id_) : "");
+	};
+	Exps.prototype.PeerLatency = function (ret, id_)
+	{
+		if (!isSupported)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var peer = this.mp["getPeerById"](id_);
+		ret.set_float(peer ? peer["latency"] : 0);
+	};
+	Exps.prototype.PeerPDV = function (ret, id_)
+	{
+		if (!isSupported)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var peer = this.mp["getPeerById"](id_);
+		ret.set_float(peer ? peer["pdv"] : 0);
+	};
+	Exps.prototype.StatOutboundCount = function (ret)
+	{
+		ret.set_int(isSupported ? this.mp["stats"]["outboundPerSec"] : 0);
+	};
+	Exps.prototype.StatOutboundBandwidth = function (ret)
+	{
+		ret.set_int(isSupported ? this.mp["stats"]["outboundBandwidthPerSec"] : 0);
+	};
+	Exps.prototype.StatInboundCount = function (ret)
+	{
+		ret.set_int(isSupported ? this.mp["stats"]["inboundPerSec"] : 0);
+	};
+	Exps.prototype.StatInboundBandwidth = function (ret)
+	{
+		ret.set_int(isSupported ? this.mp["stats"]["inboundBandwidthPerSec"] : 0);
+	};
+	Exps.prototype.PeerState = function (ret, id_, tag_)
+	{
+		if (!isSupported)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var peer = this.mp["getPeerById"](id_);
+		ret.set_float(peer ? peer["getInterpClientState"](tag_) : 0);
+	};
+	Exps.prototype.ClientXError = function (ret)
+	{
+		ret.set_float(clientXerror);
+	};
+	Exps.prototype.ClientYError = function (ret)
+	{
+		ret.set_float(clientYerror);
+	};
+	Exps.prototype.HostX = function (ret)
+	{
+		ret.set_float(hostX);
+	};
+	Exps.prototype.HostY = function (ret)
+	{
+		ret.set_float(hostY);
+	};
+	Exps.prototype.PeerCount = function (ret)
+	{
+		ret.set_int(isSupported ? this.mp["getPeerCount"]() : 0);
+	};
+	Exps.prototype.ListInstanceCount = function (ret)
+	{
+		if (this.gameInstanceList)
+		{
+			ret.set_int(this.gameInstanceList.length);
+		}
+		else
+			ret.set_int(0);
+	};
+	Exps.prototype.ListInstanceName = function (ret, index)
+	{
+		index = Math.floor(index);
+		if (this.gameInstanceList)
+		{
+			if (index < 0 || index >= this.gameInstanceList.length)
+			{
+				ret.set_string("");
+			}
+			else
+				ret.set_string(this.gameInstanceList[index]["name"] || "");
+		}
+		else
+			ret.set_string("");
+	};
+	Exps.prototype.ListInstancePeerCount = function (ret, index)
+	{
+		index = Math.floor(index);
+		if (this.gameInstanceList)
+		{
+			if (index < 0 || index >= this.gameInstanceList.length)
+			{
+				ret.set_int(0);
+			}
+			else
+				ret.set_int(this.gameInstanceList[index]["peercount"] || 0);
+		}
+		else
+			ret.set_int(0);
+	};
+	Exps.prototype.ListRoomCount = function (ret)
+	{
+		ret.set_int(this.roomList ? this.roomList.length : 0);
+	};
+	function getListRoomAt(roomList, i)
+	{
+		if (!roomList)
+			return null;
+		i = Math.floor(i);
+		if (i < 0 || i >= roomList.length)
+			return null;
+		return roomList[i];
+	};
+	Exps.prototype.ListRoomName = function (ret, index)
+	{
+		var r = getListRoomAt(this.roomList, index);
+		ret.set_string(r ? r["name"] : "");
+	};
+	Exps.prototype.ListRoomPeerCount = function (ret, index)
+	{
+		var r = getListRoomAt(this.roomList, index);
+		ret.set_int(r ? r["peercount"] : 0);
+	};
+	Exps.prototype.ListRoomMaxPeerCount = function (ret, index)
+	{
+		var r = getListRoomAt(this.roomList, index);
+		ret.set_int(r ? r["maxpeercount"] : 0);
+	};
+	Exps.prototype.ListRoomState = function (ret, index)
+	{
+		var r = getListRoomAt(this.roomList, index);
+		ret.set_string(r ? r["state"] : "");
+	};
+	Exps.prototype.LeaveReason = function (ret)
+	{
+		ret.set_string(this.leaveReason);
+	};
+	instanceProto.lagCompensate = function (movingPeerID, fromPeerID, tag, interp)
+	{
+		if (!isSupported)
+			return 0;
+		if (!this.mp["isHost"]())
+			return 0;
+		var movePeer = this.mp["getPeerById"](movingPeerID);
+		if (!movePeer)
+			return 0;
+		var moveInst = this.getAssociatedInstanceForPeer(movePeer);
+		if (!moveInst)
+			return 0;
+		var ret = 0;
+		switch (tag) {
+		case "x":	ret = moveInst.x;		break;
+		case "y":	ret = moveInst.y;		break;
+		case "a":	ret = moveInst.angle;	break;
+		}
+		var fromPeer = this.mp["getPeerById"](fromPeerID);
+		if (!fromPeer || fromPeer === movePeer)		// cannot find that peer or is same peer
+			return ret;
+		if (this.mp["me"] === fromPeer)
+			return ret;
+		var delay = (fromPeer["latency"] + this.mp["clientDelay"]) * 2;
+		var moveUid = moveInst.uid;
+		if (!this.objectHistories.hasOwnProperty(moveUid))
+			return ret;		// no object history data yet
+		var oh = this.objectHistories[moveUid];
+		var interp = oh.getInterp(tag, 0, cr.performance_now() - delay, interp);
+		if (typeof interp === "undefined")
+			return ret;
+		else
+			return interp;
+	};
+	Exps.prototype.LagCompensateX = function (ret, movingPeerID, fromPeerID)
+	{
+		ret.set_float(this.lagCompensate(movingPeerID, fromPeerID, "x", this.mp["INTERP_LINEAR"]));
+	};
+	Exps.prototype.LagCompensateY = function (ret, movingPeerID, fromPeerID)
+	{
+		ret.set_float(this.lagCompensate(movingPeerID, fromPeerID, "y", this.mp["INTERP_LINEAR"]));
+	};
+	Exps.prototype.LagCompensateAngle = function (ret, movingPeerID, fromPeerID)
+	{
+		ret.set_float(cr.to_degrees(this.lagCompensate(movingPeerID, fromPeerID, "a", this.mp["INTERP_ANGULAR"])));
+	};
+	Exps.prototype.PeerIDAt = function (ret, i)
+	{
+		if (!isSupported)
+		{
+			ret.set_string("");
+			return;
+		}
+		i = Math.floor(i);
+		var peer = this.mp["getPeerAt"](i);
+		ret.set_string(peer ? peer["id"] : "");
+	};
+	Exps.prototype.PeerAliasAt = function (ret, i)
+	{
+		if (!isSupported)
+		{
+			ret.set_string("");
+			return;
+		}
+		i = Math.floor(i);
+		var peer = this.mp["getPeerAt"](i);
+		ret.set_string(peer ? peer["alias"] : "");
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.plugins_.NinePatch = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.NinePatch.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+		if (this.is_family)
+			return;
+		this.texture_img = new Image();
+		this.texture_img.cr_filesize = this.texture_filesize;
+		this.runtime.waitForImageLoad(this.texture_img, this.texture_file);
+		this.fillPattern = null;
+		this.leftPattern = null;
+		this.rightPattern = null;
+		this.topPattern = null;
+		this.bottomPattern = null;
+		this.webGL_texture = null;
+		this.webGL_fillTexture = null;
+		this.webGL_leftTexture = null;
+		this.webGL_rightTexture = null;
+		this.webGL_topTexture = null;
+		this.webGL_bottomTexture = null;
+	};
+	typeProto.onLostWebGLContext = function ()
+	{
+		if (this.is_family)
+			return;
+		this.webGL_texture = null;
+		this.webGL_fillTexture = null;
+		this.webGL_leftTexture = null;
+		this.webGL_rightTexture = null;
+		this.webGL_topTexture = null;
+		this.webGL_bottomTexture = null;
+	};
+	typeProto.onRestoreWebGLContext = function ()
+	{
+		if (this.is_family || !this.instances.length)
+			return;
+		if (!this.webGL_texture)
+		{
+			this.webGL_texture = this.runtime.glwrap.loadTexture(this.texture_img, true, this.runtime.linearSampling, this.texture_pixelformat);
+		}
+	};
+	typeProto.unloadTextures = function ()
+	{
+		if (this.is_family || this.instances.length)
+			return;
+		if (this.runtime.glwrap)
+		{
+			this.runtime.glwrap.deleteTexture(this.webGL_texture);
+			this.runtime.glwrap.deleteTexture(this.webGL_fillTexture);
+			this.runtime.glwrap.deleteTexture(this.webGL_leftTexture);
+			this.runtime.glwrap.deleteTexture(this.webGL_rightTexture);
+			this.runtime.glwrap.deleteTexture(this.webGL_topTexture);
+			this.runtime.glwrap.deleteTexture(this.webGL_bottomTexture);
+			this.webGL_texture = null;
+			this.webGL_fillTexture = null;
+			this.webGL_leftTexture = null;
+			this.webGL_rightTexture = null;
+			this.webGL_topTexture = null;
+			this.webGL_bottomTexture = null;
+		}
+	};
+	typeProto.slicePatch = function (x1, y1, x2, y2)
+	{
+		var tmpcanvas = document.createElement("canvas");
+		var w = x2 - x1;
+		var h = y2 - y1;
+		tmpcanvas.width = w;
+		tmpcanvas.height = h;
+		var tmpctx = tmpcanvas.getContext("2d");
+		tmpctx.drawImage(this.texture_img, x1, y1, w, h, 0, 0, w, h);
+		return tmpcanvas;
+	};
+	typeProto.createPatch = function (lm, rm, tm, bm)
+	{
+		var iw = this.texture_img.width;
+		var ih = this.texture_img.height;
+		var re = iw - rm;
+		var be = ih - bm;
+		if (this.runtime.glwrap)
+		{
+			if (this.webGL_fillTexture)
+				return;		// already created
+			var glwrap = this.runtime.glwrap;
+			var ls = this.runtime.linearSampling;
+			var tf = this.texture_pixelformat;
+			if (re > lm && be > tm)
+				this.webGL_fillTexture = glwrap.loadTexture(this.slicePatch(lm, tm, re, be), true, ls, tf);
+			if (lm > 0 && be > tm)
+				this.webGL_leftTexture = glwrap.loadTexture(this.slicePatch(0, tm, lm, be), true, ls, tf, "repeat-y");
+			if (rm > 0 && be > tm)
+				this.webGL_rightTexture = glwrap.loadTexture(this.slicePatch(re, tm, iw, be), true, ls, tf, "repeat-y");
+			if (tm > 0 && re > lm)
+				this.webGL_topTexture = glwrap.loadTexture(this.slicePatch(lm, 0, re, tm), true, ls, tf, "repeat-x");
+			if (bm > 0 && re > lm)
+				this.webGL_bottomTexture = glwrap.loadTexture(this.slicePatch(lm, be, re, ih), true, ls, tf, "repeat-x");
+		}
+		else
+		{
+			if (this.fillPattern)
+				return;		// already created
+			var ctx = this.runtime.ctx;
+			if (re > lm && be > tm)
+				this.fillPattern = ctx.createPattern(this.slicePatch(lm, tm, re, be), "repeat");
+			if (lm > 0 && be > tm)
+				this.leftPattern = ctx.createPattern(this.slicePatch(0, tm, lm, be), "repeat");
+			if (rm > 0 && be > tm)
+				this.rightPattern = ctx.createPattern(this.slicePatch(re, tm, iw, be), "repeat");
+			if (tm > 0 && re > lm)
+				this.topPattern = ctx.createPattern(this.slicePatch(lm, 0, re, tm), "repeat");
+			if (bm > 0 && re > lm)
+				this.bottomPattern = ctx.createPattern(this.slicePatch(lm, be, re, ih), "repeat");
+		}
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	instanceProto.onCreate = function()
+	{
+		this.leftMargin = this.properties[0];
+		this.rightMargin = this.properties[1];
+		this.topMargin = this.properties[2];
+		this.bottomMargin = this.properties[3];
+		this.edges = this.properties[4];					// 0=tile, 1=stretch
+		this.fill = this.properties[5];						// 0=tile, 1=stretch, 2=transparent
+		this.visible = (this.properties[6] === 0);			// 0=visible, 1=invisible
+		this.seamless = (this.properties[8] !== 0);			// 1px overdraw to hide seams
+		if (this.recycled)
+			this.rcTex.set(0, 0, 0, 0);
+		else
+			this.rcTex = new cr.rect(0, 0, 0, 0);
+		if (this.runtime.glwrap)
+		{
+			if (!this.type.webGL_texture)
+			{
+				this.type.webGL_texture = this.runtime.glwrap.loadTexture(this.type.texture_img, false, this.runtime.linearSampling, this.type.texture_pixelformat);
+			}
+		}
+		this.type.createPatch(this.leftMargin, this.rightMargin, this.topMargin, this.bottomMargin);
+	};
+	function drawPatternProperly(ctx, pattern, pw, ph, drawX, drawY, w, h, ox, oy)
+	{
+		ctx.save();
+		ctx.fillStyle = pattern;
+		var offX = drawX % pw;
+		var offY = drawY % ph;
+		if (offX < 0)
+			offX += pw;
+		if (offY < 0)
+			offY += ph;
+		ctx.translate(offX + ox, offY + oy);
+		ctx.fillRect(drawX - offX - ox, drawY - offY - oy, w, h);
+		ctx.restore();
+	};
+	instanceProto.draw = function(ctx)
+	{
+		var img = this.type.texture_img;
+		var lm = this.leftMargin;
+		var rm = this.rightMargin;
+		var tm = this.topMargin;
+		var bm = this.bottomMargin;
+		var iw = img.width;
+		var ih = img.height;
+		var re = iw - rm;
+		var be = ih - bm;
+		ctx.globalAlpha = this.opacity;
+		ctx.save();
+		var myx = this.x;
+		var myy = this.y;
+		var myw = this.width;
+		var myh = this.height;
+		if (this.runtime.pixel_rounding)
+		{
+			myx = Math.round(myx);
+			myy = Math.round(myy);
+		}
+		var drawX = -(this.hotspotX * this.width);
+		var drawY = -(this.hotspotY * this.height);
+		var offX = drawX % iw;
+		var offY = drawY % ih;
+		if (offX < 0)
+			offX += iw;
+		if (offY < 0)
+			offY += ih;
+		ctx.translate(myx + offX, myy + offY);
+		var x = drawX - offX;
+		var y = drawY - offY;
+		var s = (this.seamless ? 1 : 0);
+		if (lm > 0 && tm > 0)
+			ctx.drawImage(img, 0, 0, lm + s, tm + s, x, y, lm + s, tm + s);
+		if (rm > 0 && tm > 0)
+			ctx.drawImage(img, re - s, 0, rm + s, tm + s, x + myw - rm - s, y, rm + s, tm + s);
+		if (rm > 0 && bm > 0)
+			ctx.drawImage(img, re - s, be - s, rm + s, bm + s, x + myw - rm - s, y + myh - bm - s, rm + s, bm + s);
+		if (lm > 0 && bm > 0)
+			ctx.drawImage(img, 0, be - s, lm + s, bm + s, x, y + myh - bm - s, lm + s, bm + s);
+		if (this.edges === 0)		// tile edges
+		{
+			var off = (this.fill === 2 ? 0 : s);
+			if (lm > 0 && be > tm)
+				drawPatternProperly(ctx, this.type.leftPattern, lm, be - tm, x, y + tm, lm + off, myh - tm - bm, 0, 0);
+			if (rm > 0 && be > tm)
+				drawPatternProperly(ctx, this.type.rightPattern, rm, be - tm, x + myw - rm - off, y + tm, rm + off, myh - tm - bm, off, 0);
+			if (tm > 0 && re > lm)
+				drawPatternProperly(ctx, this.type.topPattern, re - lm, tm, x + lm, y, myw - lm - rm, tm + off, 0, 0);
+			if (bm > 0 && re > lm)
+				drawPatternProperly(ctx, this.type.bottomPattern, re - lm, bm, x + lm, y + myh - bm - off, myw - lm - rm, bm + off, 0, off);
+		}
+		else if (this.edges === 1)	// stretch edges
+		{
+			if (lm > 0 && be > tm && myh - tm - bm > 0)
+				ctx.drawImage(img, 0, tm, lm, be - tm, x, y + tm, lm, myh - tm - bm);
+			if (rm > 0 && be > tm && myh - tm - bm > 0)
+				ctx.drawImage(img, re, tm, rm, be - tm, x + myw - rm, y + tm, rm, myh - tm - bm);
+			if (tm > 0 && re > lm && myw - lm - rm > 0)
+				ctx.drawImage(img, lm, 0, re - lm, tm, x + lm, y, myw - lm - rm, tm);
+			if (bm > 0 && re > lm && myw - lm - rm > 0)
+				ctx.drawImage(img, lm, be, re - lm, bm, x + lm, y + myh - bm, myw - lm - rm, bm);
+		}
+		if (be > tm && re > lm)
+		{
+			if (this.fill === 0)		// tile fill
+			{
+				drawPatternProperly(ctx, this.type.fillPattern, re - lm, be - tm, x + lm, y + tm, myw - lm - rm, myh - tm - bm, 0, 0);
+			}
+			else if (this.fill === 1)	// stretch fill
+			{
+				if (myw - lm - rm > 0 && myh - tm - bm > 0)
+				{
+					ctx.drawImage(img, lm, tm, re - lm, be - tm, x + lm, y + tm, myw - lm - rm, myh - tm - bm);
+				}
+			}
+		}
+		ctx.restore();
+	};
+	instanceProto.drawPatch = function(glw, tex, sx, sy, sw, sh, dx, dy, dw, dh)
+	{
+		glw.setTexture(tex);
+		var rcTex = this.rcTex;
+		rcTex.left = sx / tex.c2width;
+		rcTex.top = sy / tex.c2height;
+		rcTex.right = (sx + sw) / tex.c2width;
+		rcTex.bottom = (sy + sh) / tex.c2height;
+		glw.quadTex(dx, dy, dx + dw, dy, dx + dw, dy + dh, dx, dy + dh, rcTex);
+	};
+	instanceProto.tilePatch = function(glw, tex, dx, dy, dw, dh, ox, oy)
+	{
+		glw.setTexture(tex);
+		var rcTex = this.rcTex;
+		rcTex.left = -ox / tex.c2width;
+		rcTex.top = -oy / tex.c2height;
+		rcTex.right = (dw - ox) / tex.c2width;
+		rcTex.bottom = (dh - oy) / tex.c2height;
+		glw.quadTex(dx, dy, dx + dw, dy, dx + dw, dy + dh, dx, dy + dh, rcTex);
+	};
+	instanceProto.drawGL_earlyZPass = function(glw)
+	{
+		this.drawGL(glw);
+	};
+	instanceProto.drawGL = function(glw)
+	{
+		var lm = this.leftMargin;
+		var rm = this.rightMargin;
+		var tm = this.topMargin;
+		var bm = this.bottomMargin;
+		var iw = this.type.texture_img.width;
+		var ih = this.type.texture_img.height;
+		var re = iw - rm;
+		var be = ih - bm;
+		glw.setOpacity(this.opacity);
+		var rcTex = this.rcTex;
+		var q = this.bquad;
+		var myx = q.tlx;
+		var myy = q.tly;
+		var myw = this.width;
+		var myh = this.height;
+		if (this.runtime.pixel_rounding)
+		{
+			myx = Math.round(myx);
+			myy = Math.round(myy);
+		}
+		var s = (this.seamless ? 1 : 0);
+		if (lm > 0 && tm > 0)
+			this.drawPatch(glw, this.type.webGL_texture, 0, 0, lm + s, tm + s, myx, myy, lm + s, tm + s);
+		if (rm > 0 && tm > 0)
+			this.drawPatch(glw, this.type.webGL_texture, re - s, 0, rm + s, tm + s, myx + myw - rm - s, myy, rm + s, tm + s);
+		if (rm > 0 && bm > 0)
+			this.drawPatch(glw, this.type.webGL_texture, re - s, be - s, rm + s, bm + s, myx + myw - rm - s, myy + myh - bm - s, rm + s, bm + s);
+		if (lm > 0 && bm > 0)
+			this.drawPatch(glw, this.type.webGL_texture, 0, be - s, lm + s, bm + s, myx, myy + myh - bm - s, lm + s, bm + s);
+		if (this.edges === 0)		// tile edges
+		{
+			var off = (this.fill === 2 ? 0 : s);
+			if (lm > 0 && be > tm)
+				this.tilePatch(glw, this.type.webGL_leftTexture, myx, myy + tm, lm + off, myh - tm - bm, 0, 0);
+			if (rm > 0 && be > tm)
+				this.tilePatch(glw, this.type.webGL_rightTexture, myx + myw - rm - off, myy + tm, rm + off, myh - tm - bm, off, 0);
+			if (tm > 0 && re > lm)
+				this.tilePatch(glw, this.type.webGL_topTexture, myx + lm, myy, myw - lm - rm, tm + off, 0, 0);
+			if (bm > 0 && re > lm)
+				this.tilePatch(glw, this.type.webGL_bottomTexture, myx + lm, myy + myh - bm - off, myw - lm - rm, bm + off, 0, off);
+		}
+		else if (this.edges === 1)	// stretch edges
+		{
+			if (lm > 0 && be > tm)
+				this.drawPatch(glw, this.type.webGL_texture, 0, tm, lm, be - tm, myx, myy + tm, lm, myh - tm - bm);
+			if (rm > 0 && be > tm)
+				this.drawPatch(glw, this.type.webGL_texture, re, tm, rm, be - tm, myx + myw - rm, myy + tm, rm, myh - tm - bm);
+			if (tm > 0 && re > lm)
+				this.drawPatch(glw, this.type.webGL_texture, lm, 0, re - lm, tm, myx + lm, myy, myw - lm - rm, tm);
+			if (bm > 0 && re > lm)
+				this.drawPatch(glw, this.type.webGL_texture, lm, be, re - lm, bm, myx + lm, myy + myh - bm, myw - lm - rm, bm);
+		}
+		if (be > tm && re > lm)
+		{
+			if (this.fill === 0)		// tile fill
+			{
+				this.tilePatch(glw, this.type.webGL_fillTexture, myx + lm, myy + tm, myw - lm - rm, myh - tm - bm, 0, 0);
+			}
+			else if (this.fill === 1)	// stretch fill
+			{
+				this.drawPatch(glw, this.type.webGL_texture, lm, tm, re - lm, be - tm, myx + lm, myy + tm, myw - lm - rm, myh - tm - bm);
+			}
+		}
+	};
+	function Cnds() {};
+	Cnds.prototype.OnURLLoaded = function ()
+	{
+		return true;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetEffect = function (effect)
+	{
+		this.blend_mode = effect;
+		this.compositeOp = cr.effectToCompositeOp(effect);
+		cr.setGLBlend(this, effect, this.runtime.gl);
+		this.runtime.redraw = true;
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
 	pluginProto.exps = new Exps();
 }());
 ;
@@ -19270,6 +21667,318 @@ cr.plugins_.Text = function(runtime)
 	Exps.prototype.TextHeight = function (ret)
 	{
 		ret.set_int(this.lines.length * (this.pxHeight + this.line_height_offset) - this.line_height_offset);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.plugins_.TextBox = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.TextBox.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var elemTypes = ["text", "password", "email", "number", "tel", "url"];
+	if (navigator.userAgent.indexOf("MSIE 9") > -1)
+	{
+		elemTypes[2] = "text";
+		elemTypes[3] = "text";
+		elemTypes[4] = "text";
+		elemTypes[5] = "text";
+	}
+	instanceProto.onCreate = function()
+	{
+		if (this.runtime.isDomFree)
+		{
+			cr.logexport("[Construct 2] Textbox plugin not supported on this platform - the object will not be created");
+			return;
+		}
+		if (this.properties[7] === 6)	// textarea
+		{
+			this.elem = document.createElement("textarea");
+			jQuery(this.elem).css("resize", "none");
+		}
+		else
+		{
+			this.elem = document.createElement("input");
+			this.elem.type = elemTypes[this.properties[7]];
+		}
+		this.elem.id = this.properties[9];
+		jQuery(this.elem).appendTo(this.runtime.canvasdiv ? this.runtime.canvasdiv : "body");
+		this.elem["autocomplete"] = "off";
+		this.elem.value = this.properties[0];
+		this.elem["placeholder"] = this.properties[1];
+		this.elem.title = this.properties[2];
+		this.elem.disabled = (this.properties[4] === 0);
+		this.elem["readOnly"] = (this.properties[5] === 1);
+		this.elem["spellcheck"] = (this.properties[6] === 1);
+		this.autoFontSize = (this.properties[8] !== 0);
+		this.element_hidden = false;
+		if (this.properties[3] === 0)
+		{
+			jQuery(this.elem).hide();
+			this.visible = false;
+			this.element_hidden = true;
+		}
+		var onchangetrigger = (function (self) {
+			return function() {
+				self.runtime.trigger(cr.plugins_.TextBox.prototype.cnds.OnTextChanged, self);
+			};
+		})(this);
+		this.elem["oninput"] = onchangetrigger;
+		if (navigator.userAgent.indexOf("MSIE") !== -1)
+			this.elem["oncut"] = onchangetrigger;
+		this.elem.onclick = (function (self) {
+			return function(e) {
+				e.stopPropagation();
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.TextBox.prototype.cnds.OnClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		})(this);
+		this.elem.ondblclick = (function (self) {
+			return function(e) {
+				e.stopPropagation();
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.TextBox.prototype.cnds.OnDoubleClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		})(this);
+		this.elem.addEventListener("touchstart", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchmove", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchend", function (e) {
+			e.stopPropagation();
+		}, false);
+		jQuery(this.elem).mousedown(function (e) {
+			e.stopPropagation();
+		});
+		jQuery(this.elem).mouseup(function (e) {
+			e.stopPropagation();
+		});
+		jQuery(this.elem).keydown(function (e) {
+			if (e.which !== 13 && e.which != 27)	// allow enter and escape
+				e.stopPropagation();
+		});
+		jQuery(this.elem).keyup(function (e) {
+			if (e.which !== 13 && e.which != 27)	// allow enter and escape
+				e.stopPropagation();
+		});
+		this.lastLeft = 0;
+		this.lastTop = 0;
+		this.lastRight = 0;
+		this.lastBottom = 0;
+		this.lastWinWidth = 0;
+		this.lastWinHeight = 0;
+		this.updatePosition(true);
+		this.runtime.tickMe(this);
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return {
+			"text": this.elem.value,
+			"placeholder": this.elem.placeholder,
+			"tooltip": this.elem.title,
+			"disabled": !!this.elem.disabled,
+			"readonly": !!this.elem.readOnly,
+			"spellcheck": !!this.elem["spellcheck"]
+		};
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.elem.value = o["text"];
+		this.elem.placeholder = o["placeholder"];
+		this.elem.title = o["tooltip"];
+		this.elem.disabled = o["disabled"];
+		this.elem.readOnly = o["readonly"];
+		this.elem["spellcheck"] = o["spellcheck"];
+	};
+	instanceProto.onDestroy = function ()
+	{
+		if (this.runtime.isDomFree)
+				return;
+		jQuery(this.elem).remove();
+		this.elem = null;
+	};
+	instanceProto.tick = function ()
+	{
+		this.updatePosition();
+	};
+	instanceProto.updatePosition = function (first)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		var left = this.layer.layerToCanvas(this.x, this.y, true);
+		var top = this.layer.layerToCanvas(this.x, this.y, false);
+		var right = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, true);
+		var bottom = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, false);
+		var rightEdge = this.runtime.width / this.runtime.devicePixelRatio;
+		var bottomEdge = this.runtime.height / this.runtime.devicePixelRatio;
+		if (!this.visible || !this.layer.visible || right <= 0 || bottom <= 0 || left >= rightEdge || top >= bottomEdge)
+		{
+			if (!this.element_hidden)
+				jQuery(this.elem).hide();
+			this.element_hidden = true;
+			return;
+		}
+		if (left < 1)
+			left = 1;
+		if (top < 1)
+			top = 1;
+		if (right >= rightEdge)
+			right = rightEdge - 1;
+		if (bottom >= bottomEdge)
+			bottom = bottomEdge - 1;
+		var curWinWidth = window.innerWidth;
+		var curWinHeight = window.innerHeight;
+		if (!first && this.lastLeft === left && this.lastTop === top && this.lastRight === right && this.lastBottom === bottom && this.lastWinWidth === curWinWidth && this.lastWinHeight === curWinHeight)
+		{
+			if (this.element_hidden)
+			{
+				jQuery(this.elem).show();
+				this.element_hidden = false;
+			}
+			return;
+		}
+		this.lastLeft = left;
+		this.lastTop = top;
+		this.lastRight = right;
+		this.lastBottom = bottom;
+		this.lastWinWidth = curWinWidth;
+		this.lastWinHeight = curWinHeight;
+		if (this.element_hidden)
+		{
+			jQuery(this.elem).show();
+			this.element_hidden = false;
+		}
+		var offx = Math.round(left) + jQuery(this.runtime.canvas).offset().left;
+		var offy = Math.round(top) + jQuery(this.runtime.canvas).offset().top;
+		jQuery(this.elem).css("position", "absolute");
+		jQuery(this.elem).offset({left: offx, top: offy});
+		jQuery(this.elem).width(Math.round(right - left));
+		jQuery(this.elem).height(Math.round(bottom - top));
+		if (this.autoFontSize)
+			jQuery(this.elem).css("font-size", ((this.layer.getScale(true) / this.runtime.devicePixelRatio) - 0.2) + "em");
+	};
+	instanceProto.draw = function(ctx)
+	{
+	};
+	instanceProto.drawGL = function(glw)
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.CompareText = function (text, case_)
+	{
+		if (this.runtime.isDomFree)
+			return false;
+		if (case_ === 0)	// insensitive
+			return cr.equals_nocase(this.elem.value, text);
+		else
+			return this.elem.value === text;
+	};
+	Cnds.prototype.OnTextChanged = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnClicked = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnDoubleClicked = function ()
+	{
+		return true;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetText = function (text)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.value = text;
+	};
+	Acts.prototype.SetPlaceholder = function (text)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.placeholder = text;
+	};
+	Acts.prototype.SetTooltip = function (text)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.title = text;
+	};
+	Acts.prototype.SetVisible = function (vis)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.visible = (vis !== 0);
+	};
+	Acts.prototype.SetEnabled = function (en)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.disabled = (en === 0);
+	};
+	Acts.prototype.SetReadOnly = function (ro)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.readOnly = (ro === 0);
+	};
+	Acts.prototype.SetFocus = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.focus();
+	};
+	Acts.prototype.SetBlur = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.blur();
+	};
+	Acts.prototype.SetCSSStyle = function (p, v)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		jQuery(this.elem).css(p, v);
+	};
+	Acts.prototype.ScrollToBottom = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.scrollTop = this.elem.scrollHeight;
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.Text = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		ret.set_string(this.elem.value);
 	};
 	pluginProto.exps = new Exps();
 }());
@@ -21762,6 +24471,204 @@ cr.behaviors.EightDir = function(runtime)
 	Exps.prototype.VectorY = function (ret)
 	{
 		ret.set_float(this.dy);
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
+cr.behaviors.Fade = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.Fade.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.activeAtStart = this.properties[0] === 1;
+		this.setMaxOpacity = false;					// used to retrieve maxOpacity once in first 'Start fade' action if initially inactive
+		this.fadeInTime = this.properties[1];
+		this.waitTime = this.properties[2];
+		this.fadeOutTime = this.properties[3];
+		this.destroy = this.properties[4];			// 0 = no, 1 = after fade out
+		this.stage = this.activeAtStart ? 0 : 3;		// 0 = fade in, 1 = wait, 2 = fade out, 3 = done
+		if (this.recycled)
+			this.stageTime.reset();
+		else
+			this.stageTime = new cr.KahanAdder();
+		this.maxOpacity = (this.inst.opacity ? this.inst.opacity : 1.0);
+		if (this.activeAtStart)
+		{
+			if (this.fadeInTime === 0)
+			{
+				this.stage = 1;
+				if (this.waitTime === 0)
+					this.stage = 2;
+			}
+			else
+			{
+				this.inst.opacity = 0;
+				this.runtime.redraw = true;
+			}
+		}
+	};
+	behinstProto.saveToJSON = function ()
+	{
+		return {
+			"fit": this.fadeInTime,
+			"wt": this.waitTime,
+			"fot": this.fadeOutTime,
+			"s": this.stage,
+			"st": this.stageTime.sum,
+			"mo": this.maxOpacity,
+		};
+	};
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.fadeInTime = o["fit"];
+		this.waitTime = o["wt"];
+		this.fadeOutTime = o["fot"];
+		this.stage = o["s"];
+		this.stageTime.reset();
+		this.stageTime.sum = o["st"];
+		this.maxOpacity = o["mo"];
+	};
+	behinstProto.tick = function ()
+	{
+		this.stageTime.add(this.runtime.getDt(this.inst));
+		if (this.stage === 0)
+		{
+			this.inst.opacity = (this.stageTime.sum / this.fadeInTime) * this.maxOpacity;
+			this.runtime.redraw = true;
+			if (this.inst.opacity >= this.maxOpacity)
+			{
+				this.inst.opacity = this.maxOpacity;
+				this.stage = 1;	// wait stage
+				this.stageTime.reset();
+				this.runtime.trigger(cr.behaviors.Fade.prototype.cnds.OnFadeInEnd, this.inst);
+			}
+		}
+		if (this.stage === 1)
+		{
+			if (this.stageTime.sum >= this.waitTime)
+			{
+				this.stage = 2;	// fade out stage
+				this.stageTime.reset();
+				this.runtime.trigger(cr.behaviors.Fade.prototype.cnds.OnWaitEnd, this.inst);
+			}
+		}
+		if (this.stage === 2)
+		{
+			if (this.fadeOutTime !== 0)
+			{
+				this.inst.opacity = this.maxOpacity - ((this.stageTime.sum / this.fadeOutTime) * this.maxOpacity);
+				this.runtime.redraw = true;
+				if (this.inst.opacity < 0)
+				{
+					this.inst.opacity = 0;
+					this.stage = 3;	// done
+					this.stageTime.reset();
+					this.runtime.trigger(cr.behaviors.Fade.prototype.cnds.OnFadeOutEnd, this.inst);
+					if (this.destroy === 1)
+						this.runtime.DestroyInstance(this.inst);
+				}
+			}
+		}
+	};
+	behinstProto.doStart = function ()
+	{
+		this.stage = 0;
+		this.stageTime.reset();
+		if (this.fadeInTime === 0)
+		{
+			this.stage = 1;
+			if (this.waitTime === 0)
+				this.stage = 2;
+		}
+		else
+		{
+			this.inst.opacity = 0;
+			this.runtime.redraw = true;
+		}
+	};
+	function Cnds() {};
+	Cnds.prototype.OnFadeOutEnd = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnFadeInEnd = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnWaitEnd = function ()
+	{
+		return true;
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.StartFade = function ()
+	{
+		if (!this.activeAtStart && !this.setMaxOpacity)
+		{
+			this.maxOpacity = (this.inst.opacity ? this.inst.opacity : 1.0);
+			this.setMaxOpacity = true;
+		}
+		if (this.stage === 3)
+			this.doStart();
+	};
+	Acts.prototype.RestartFade = function ()
+	{
+		this.doStart();
+	};
+	Acts.prototype.SetFadeInTime = function (t)
+	{
+		if (t < 0)
+			t = 0;
+		this.fadeInTime = t;
+	};
+	Acts.prototype.SetWaitTime = function (t)
+	{
+		if (t < 0)
+			t = 0;
+		this.waitTime = t;
+	};
+	Acts.prototype.SetFadeOutTime = function (t)
+	{
+		if (t < 0)
+			t = 0;
+		this.fadeOutTime = t;
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.FadeInTime = function (ret)
+	{
+		ret.set_float(this.fadeInTime);
+	};
+	Exps.prototype.WaitTime = function (ret)
+	{
+		ret.set_float(this.waitTime);
+	};
+	Exps.prototype.FadeOutTime = function (ret)
+	{
+		ret.set_float(this.fadeOutTime);
 	};
 	behaviorProto.exps = new Exps();
 }());
@@ -24806,6 +27713,170 @@ cr.behaviors.Physics = function(runtime)
 }());
 ;
 ;
+cr.behaviors.Pin = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.Pin.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.pinObject = null;
+		this.pinObjectUid = -1;		// for loading
+		this.pinAngle = 0;
+		this.pinDist = 0;
+		this.myStartAngle = 0;
+		this.theirStartAngle = 0;
+		this.lastKnownAngle = 0;
+		this.mode = 0;				// 0 = position & angle; 1 = position; 2 = angle; 3 = rope; 4 = bar
+		var self = this;
+		if (!this.recycled)
+		{
+			this.myDestroyCallback = (function(inst) {
+													self.onInstanceDestroyed(inst);
+												});
+		}
+		this.runtime.addDestroyCallback(this.myDestroyCallback);
+	};
+	behinstProto.saveToJSON = function ()
+	{
+		return {
+			"uid": this.pinObject ? this.pinObject.uid : -1,
+			"pa": this.pinAngle,
+			"pd": this.pinDist,
+			"msa": this.myStartAngle,
+			"tsa": this.theirStartAngle,
+			"lka": this.lastKnownAngle,
+			"m": this.mode
+		};
+	};
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.pinObjectUid = o["uid"];		// wait until afterLoad to look up
+		this.pinAngle = o["pa"];
+		this.pinDist = o["pd"];
+		this.myStartAngle = o["msa"];
+		this.theirStartAngle = o["tsa"];
+		this.lastKnownAngle = o["lka"];
+		this.mode = o["m"];
+	};
+	behinstProto.afterLoad = function ()
+	{
+		if (this.pinObjectUid === -1)
+			this.pinObject = null;
+		else
+		{
+			this.pinObject = this.runtime.getObjectByUID(this.pinObjectUid);
+;
+		}
+		this.pinObjectUid = -1;
+	};
+	behinstProto.onInstanceDestroyed = function (inst)
+	{
+		if (this.pinObject == inst)
+			this.pinObject = null;
+	};
+	behinstProto.onDestroy = function()
+	{
+		this.pinObject = null;
+		this.runtime.removeDestroyCallback(this.myDestroyCallback);
+	};
+	behinstProto.tick = function ()
+	{
+	};
+	behinstProto.tick2 = function ()
+	{
+		if (!this.pinObject)
+			return;
+		if (this.lastKnownAngle !== this.inst.angle)
+			this.myStartAngle = cr.clamp_angle(this.myStartAngle + (this.inst.angle - this.lastKnownAngle));
+		var newx = this.inst.x;
+		var newy = this.inst.y;
+		if (this.mode === 3 || this.mode === 4)		// rope mode or bar mode
+		{
+			var dist = cr.distanceTo(this.inst.x, this.inst.y, this.pinObject.x, this.pinObject.y);
+			if ((dist > this.pinDist) || (this.mode === 4 && dist < this.pinDist))
+			{
+				var a = cr.angleTo(this.pinObject.x, this.pinObject.y, this.inst.x, this.inst.y);
+				newx = this.pinObject.x + Math.cos(a) * this.pinDist;
+				newy = this.pinObject.y + Math.sin(a) * this.pinDist;
+			}
+		}
+		else
+		{
+			newx = this.pinObject.x + Math.cos(this.pinObject.angle + this.pinAngle) * this.pinDist;
+			newy = this.pinObject.y + Math.sin(this.pinObject.angle + this.pinAngle) * this.pinDist;
+		}
+		var newangle = cr.clamp_angle(this.myStartAngle + (this.pinObject.angle - this.theirStartAngle));
+		this.lastKnownAngle = newangle;
+		if ((this.mode === 0 || this.mode === 1 || this.mode === 3 || this.mode === 4)
+			&& (this.inst.x !== newx || this.inst.y !== newy))
+		{
+			this.inst.x = newx;
+			this.inst.y = newy;
+			this.inst.set_bbox_changed();
+		}
+		if ((this.mode === 0 || this.mode === 2) && (this.inst.angle !== newangle))
+		{
+			this.inst.angle = newangle;
+			this.inst.set_bbox_changed();
+		}
+	};
+	function Cnds() {};
+	Cnds.prototype.IsPinned = function ()
+	{
+		return !!this.pinObject;
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Pin = function (obj, mode_)
+	{
+		if (!obj)
+			return;
+		var otherinst = obj.getFirstPicked(this.inst);
+		if (!otherinst)
+			return;
+		this.pinObject = otherinst;
+		this.pinAngle = cr.angleTo(otherinst.x, otherinst.y, this.inst.x, this.inst.y) - otherinst.angle;
+		this.pinDist = cr.distanceTo(otherinst.x, otherinst.y, this.inst.x, this.inst.y);
+		this.myStartAngle = this.inst.angle;
+		this.lastKnownAngle = this.inst.angle;
+		this.theirStartAngle = otherinst.angle;
+		this.mode = mode_;
+	};
+	Acts.prototype.Unpin = function ()
+	{
+		this.pinObject = null;
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.PinnedUID = function (ret)
+	{
+		ret.set_int(this.pinObject ? this.pinObject.uid : -1);
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
 cr.behaviors.Platform = function(runtime)
 {
 	this.runtime = runtime;
@@ -26107,6 +29178,156 @@ cr.behaviors.Sin = function(runtime)
 }());
 ;
 ;
+cr.behaviors.Timer = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.Timer.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.timers = {};
+	};
+	behinstProto.onDestroy = function ()
+	{
+		cr.wipe(this.timers);
+	};
+	behinstProto.saveToJSON = function ()
+	{
+		var o = {};
+		var p, t;
+		for (p in this.timers)
+		{
+			if (this.timers.hasOwnProperty(p))
+			{
+				t = this.timers[p];
+				o[p] = {
+					"c": t.current.sum,
+					"t": t.total.sum,
+					"d": t.duration,
+					"r": t.regular
+				};
+			}
+		}
+		return o;
+	};
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.timers = {};
+		var p;
+		for (p in o)
+		{
+			if (o.hasOwnProperty(p))
+			{
+				this.timers[p] = {
+					current: new cr.KahanAdder(),
+					total: new cr.KahanAdder(),
+					duration: o[p]["d"],
+					regular: o[p]["r"]
+				};
+				this.timers[p].current.sum = o[p]["c"];
+				this.timers[p].total.sum = o[p]["t"];
+			}
+		}
+	};
+	behinstProto.tick = function ()
+	{
+		var dt = this.runtime.getDt(this.inst);
+		var p, t;
+		for (p in this.timers)
+		{
+			if (this.timers.hasOwnProperty(p))
+			{
+				t = this.timers[p];
+				t.current.add(dt);
+				t.total.add(dt);
+			}
+		}
+	};
+	behinstProto.tick2 = function ()
+	{
+		var p, t;
+		for (p in this.timers)
+		{
+			if (this.timers.hasOwnProperty(p))
+			{
+				t = this.timers[p];
+				if (t.current.sum >= t.duration)
+				{
+					if (t.regular)
+						t.current.sum -= t.duration;
+					else
+						delete this.timers[p];
+				}
+			}
+		}
+	};
+	function Cnds() {};
+	Cnds.prototype.OnTimer = function (tag_)
+	{
+		tag_ = tag_.toLowerCase();
+		var t = this.timers[tag_];
+		if (!t)
+			return false;
+		return t.current.sum >= t.duration;
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.StartTimer = function (duration_, type_, tag_)
+	{
+		this.timers[tag_.toLowerCase()] = {
+			current: new cr.KahanAdder(),
+			total: new cr.KahanAdder(),
+			duration: duration_,
+			regular: (type_ === 1)
+		};
+	};
+	Acts.prototype.StopTimer = function (tag_)
+	{
+		tag_ = tag_.toLowerCase();
+		if (this.timers.hasOwnProperty(tag_))
+			delete this.timers[tag_];
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.CurrentTime = function (ret, tag_)
+	{
+		var t = this.timers[tag_.toLowerCase()];
+		ret.set_float(t ? t.current.sum : 0);
+	};
+	Exps.prototype.TotalTime = function (ret, tag_)
+	{
+		var t = this.timers[tag_.toLowerCase()];
+		ret.set_float(t ? t.total.sum : 0);
+	};
+	Exps.prototype.Duration = function (ret, tag_)
+	{
+		var t = this.timers[tag_.toLowerCase()];
+		ret.set_float(t ? t.duration : 0);
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
 cr.behaviors.Turret = function(runtime)
 {
 	this.runtime = runtime;
@@ -27260,15 +30481,20 @@ cr.behaviors.wrap = function(runtime)
 	};
 }());
 cr.getObjectRefTable = function () { return [
+	cr.plugins_.NinePatch,
 	cr.plugins_.Button,
 	cr.plugins_.Browser,
 	cr.plugins_.Keyboard,
 	cr.plugins_.Mouse,
-	cr.plugins_.TiledBg,
-	cr.plugins_.Particles,
-	cr.plugins_.Text,
+	cr.plugins_.Multiplayer,
+	cr.plugins_.List,
+	cr.plugins_.Function,
 	cr.plugins_.Touch,
+	cr.plugins_.TiledBg,
+	cr.plugins_.TextBox,
+	cr.plugins_.Text,
 	cr.plugins_.Sprite,
+	cr.plugins_.Particles,
 	cr.behaviors.jumpthru,
 	cr.behaviors.solid,
 	cr.behaviors.Sin,
@@ -27285,6 +30511,9 @@ cr.getObjectRefTable = function () { return [
 	cr.behaviors.Turret,
 	cr.behaviors.custom,
 	cr.behaviors.Physics,
+	cr.behaviors.Pin,
+	cr.behaviors.Timer,
+	cr.behaviors.Fade,
 	cr.plugins_.Keyboard.prototype.cnds.OnKey,
 	cr.behaviors.Platform.prototype.acts.FallThrough,
 	cr.plugins_.Keyboard.prototype.cnds.IsKeyDown,
@@ -27353,13 +30582,14 @@ cr.getObjectRefTable = function () { return [
 	cr.system_object.prototype.exps.round,
 	cr.plugins_.Sprite.prototype.cnds.IsOverlapping,
 	cr.system_object.prototype.exps.viewporttop,
+	cr.system_object.prototype.acts.AddVar,
 	cr.system_object.prototype.acts.Scroll,
+	cr.system_object.prototype.exps.abs,
+	cr.plugins_.Text.prototype.acts.SetText,
 	cr.behaviors.Platform.prototype.cnds.IsOnFloor,
 	cr.plugins_.Sprite.prototype.cnds.IsOnScreen,
 	cr.system_object.prototype.exps.viewportbottom,
 	cr.system_object.prototype.acts.ResetGlobals,
-	cr.plugins_.Sprite.prototype.cnds.CompareX,
-	cr.plugins_.Sprite.prototype.acts.SetX,
 	cr.behaviors.Bullet.prototype.acts.SetAngleOfMotion,
 	cr.plugins_.TiledBg.prototype.cnds.CompareX,
 	cr.plugins_.TiledBg.prototype.exps.Width,
@@ -27367,12 +30597,12 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.TiledBg.prototype.exps.X,
 	cr.plugins_.Touch.prototype.cnds.OnTouchStart,
 	cr.plugins_.Keyboard.prototype.cnds.OnAnyKey,
-	cr.system_object.prototype.acts.AddVar,
-	cr.plugins_.Text.prototype.acts.SetText,
 	cr.plugins_.TiledBg.prototype.acts.SetSize,
 	cr.plugins_.TiledBg.prototype.acts.SetPos,
 	cr.plugins_.TiledBg.prototype.exps.Height,
 	cr.plugins_.TiledBg.prototype.acts.Destroy,
+	cr.plugins_.Sprite.prototype.cnds.CompareX,
+	cr.plugins_.Sprite.prototype.acts.SetX,
 	cr.behaviors.Platform.prototype.cnds.OnLand,
 	cr.plugins_.Text.prototype.acts.SetWebFont,
 	cr.behaviors.Platform.prototype.acts.SetVectorY,
@@ -27395,5 +30625,102 @@ cr.getObjectRefTable = function () { return [
 	cr.system_object.prototype.exps.min,
 	cr.plugins_.Touch.prototype.cnds.OnTouchEnd,
 	cr.behaviors.Physics.prototype.acts.ApplyImpulseAtAngle,
-	cr.plugins_.Button.prototype.cnds.OnClicked
+	cr.plugins_.Button.prototype.cnds.OnClicked,
+	cr.plugins_.Sprite.prototype.acts.SetPos,
+	cr.behaviors.Pin.prototype.acts.Pin,
+	cr.behaviors.Timer.prototype.acts.StartTimer,
+	cr.plugins_.Sprite.prototype.cnds.OnCreated,
+	cr.plugins_.Sprite.prototype.acts.SetInstanceVar,
+	cr.plugins_.Sprite.prototype.exps.UID,
+	cr.plugins_.Mouse.prototype.cnds.OnClick,
+	cr.plugins_.Mouse.prototype.cnds.OnRelease,
+	cr.plugins_.Mouse.prototype.cnds.IsOverObject,
+	cr.system_object.prototype.cnds.ForEach,
+	cr.plugins_.Sprite.prototype.exps.PickedCount,
+	cr.behaviors.Turret.prototype.cnds.HasTarget,
+	cr.plugins_.Sprite.prototype.acts.RotateTowardAngle,
+	cr.behaviors.Turret.prototype.exps.RotateSpeed,
+	cr.behaviors.Pathfinding.prototype.cnds.IsMoving,
+	cr.behaviors.Pathfinding.prototype.cnds.CompareSpeed,
+	cr.behaviors.Pathfinding.prototype.exps.MaxSpeed,
+	cr.system_object.prototype.cnds.PickOverlappingPoint,
+	cr.system_object.prototype.exps.cos,
+	cr.system_object.prototype.exps.sin,
+	cr.behaviors.Pathfinding.prototype.acts.SetSpeed,
+	cr.behaviors.Pathfinding.prototype.exps.Speed,
+	cr.behaviors.Pathfinding.prototype.exps.Acceleration,
+	cr.plugins_.Mouse.prototype.cnds.OnObjectClicked,
+	cr.plugins_.Mouse.prototype.cnds.IsButtonDown,
+	cr.plugins_.NinePatch.prototype.acts.SetVisible,
+	cr.plugins_.NinePatch.prototype.acts.SetPos,
+	cr.plugins_.NinePatch.prototype.acts.SetSize,
+	cr.plugins_.NinePatch.prototype.exps.X,
+	cr.plugins_.NinePatch.prototype.exps.Width,
+	cr.plugins_.NinePatch.prototype.exps.Y,
+	cr.plugins_.NinePatch.prototype.exps.Height,
+	cr.plugins_.NinePatch.prototype.exps.Count,
+	cr.system_object.prototype.cnds.PickNth,
+	cr.system_object.prototype.exps.loopindex,
+	cr.plugins_.NinePatch.prototype.acts.Destroy,
+	cr.plugins_.Sprite.prototype.exps.BBoxLeft,
+	cr.plugins_.Sprite.prototype.exps.BBoxTop,
+	cr.plugins_.Sprite.prototype.exps.BBoxRight,
+	cr.plugins_.Sprite.prototype.exps.BBoxBottom,
+	cr.plugins_.Mouse.prototype.exps.AbsoluteX,
+	cr.system_object.prototype.acts.ScrollX,
+	cr.system_object.prototype.exps.scrollx,
+	cr.system_object.prototype.exps.windowwidth,
+	cr.plugins_.Mouse.prototype.exps.AbsoluteY,
+	cr.system_object.prototype.acts.ScrollY,
+	cr.system_object.prototype.exps.scrolly,
+	cr.system_object.prototype.exps.windowheight,
+	cr.behaviors.Fade.prototype.acts.StartFade,
+	cr.plugins_.Sprite.prototype.acts.SetHeight,
+	cr.plugins_.Sprite.prototype.cnds.CompareHeight,
+	cr.plugins_.Sprite.prototype.acts.SetAnimFrame,
+	cr.behaviors.Timer.prototype.cnds.OnTimer,
+	cr.behaviors.Pathfinding.prototype.cnds.OnArrived,
+	cr.plugins_.Sprite.prototype.cnds.OnAnyAnimFinished,
+	cr.plugins_.Mouse.prototype.cnds.OnWheel,
+	cr.system_object.prototype.exps.layoutscale,
+	cr.system_object.prototype.acts.SetLayoutScale,
+	cr.plugins_.Function.prototype.cnds.OnFunction,
+	cr.plugins_.TextBox.prototype.acts.SetText,
+	cr.plugins_.TextBox.prototype.exps.Text,
+	cr.system_object.prototype.exps.newline,
+	cr.plugins_.Function.prototype.exps.Param,
+	cr.plugins_.TextBox.prototype.acts.ScrollToBottom,
+	cr.plugins_.Multiplayer.prototype.acts.SignallingConnect,
+	cr.plugins_.Multiplayer.prototype.cnds.OnSignallingConnected,
+	cr.plugins_.Function.prototype.acts.CallFunction,
+	cr.plugins_.Multiplayer.prototype.acts.SignallingLogin,
+	cr.plugins_.Multiplayer.prototype.cnds.OnSignallingLoggedIn,
+	cr.plugins_.Multiplayer.prototype.exps.MyAlias,
+	cr.plugins_.Multiplayer.prototype.acts.SignallingJoinRoom,
+	cr.system_object.prototype.exps.projectname,
+	cr.plugins_.Multiplayer.prototype.cnds.OnSignallingJoinedRoom,
+	cr.plugins_.TextBox.prototype.acts.SetReadOnly,
+	cr.plugins_.TextBox.prototype.acts.SetFocus,
+	cr.plugins_.List.prototype.acts.AddItem,
+	cr.plugins_.Multiplayer.prototype.cnds.OnSignallingLeftRoom,
+	cr.plugins_.TextBox.prototype.acts.SetEnabled,
+	cr.plugins_.List.prototype.acts.Clear,
+	cr.plugins_.Multiplayer.prototype.cnds.OnSignallingDisconnected,
+	cr.plugins_.Multiplayer.prototype.cnds.OnSignallingError,
+	cr.plugins_.Multiplayer.prototype.exps.ErrorMessage,
+	cr.plugins_.Multiplayer.prototype.cnds.OnPeerConnected,
+	cr.plugins_.Multiplayer.prototype.exps.PeerAlias,
+	cr.plugins_.Multiplayer.prototype.cnds.OnPeerDisconnected,
+	cr.plugins_.List.prototype.exps.ItemCount,
+	cr.plugins_.List.prototype.cnds.CompareTextAt,
+	cr.plugins_.List.prototype.acts.Remove,
+	cr.plugins_.Multiplayer.prototype.cnds.OnSignallingKicked,
+	cr.plugins_.TextBox.prototype.cnds.CompareText,
+	cr.plugins_.Multiplayer.prototype.cnds.IsHost,
+	cr.plugins_.Multiplayer.prototype.acts.SendPeerMessage,
+	cr.plugins_.Multiplayer.prototype.cnds.OnPeerMessage,
+	cr.plugins_.Multiplayer.prototype.exps.FromAlias,
+	cr.plugins_.Multiplayer.prototype.exps.Message,
+	cr.plugins_.Multiplayer.prototype.acts.HostBroadcastMessage,
+	cr.plugins_.Multiplayer.prototype.exps.FromID
 ];};
